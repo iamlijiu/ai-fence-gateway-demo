@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zl.demo.fence.mapper.DesensitizationRuleMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="BaseResultMap" type="com.zl.demo.fence.entity.DesensitizationRule">
+        <id column="rule_id" property="ruleId"/>
+        <result column="rule_name" property="ruleName"/>
+        <result column="match_type" property="matchType"/>
+        <result column="match_pattern" property="matchPattern"/>
+        <result column="field_path" property="fieldPath"/>
+        <result column="mask_strategy" property="maskStrategy"/>
+        <result column="mask_config" property="maskConfig"/>
+        <result column="disposition" property="disposition"/>
+        <result column="priority" property="priority"/>
+        <result column="enabled" property="enabled"/>
+        <result column="scope" property="scope"/>
+        <result column="rule_version" property="ruleVersion"/>
+        <result column="gray_scope" property="grayScope"/>
+        <result column="description" property="description"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="created_by" property="createdBy"/>
+        <result column="updated_by" property="updatedBy"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <!-- 基础列 -->
+    <sql id="Base_Column_List">
+        rule_id, rule_name, match_type, match_pattern, field_path, mask_strategy,
+        mask_config, disposition, priority, enabled, scope, rule_version, gray_scope,
+        description, created_at, updated_at, created_by, updated_by, deleted
+    </sql>
+
+    <!-- 根据ID查询 -->
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_rule
+        WHERE rule_id = #{ruleId} AND deleted = 0
+    </select>
+
+    <!-- 查询所有启用的规则（按优先级排序） -->
+    <select id="selectAllEnabled" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_rule
+        WHERE enabled = 1 AND deleted = 0
+        ORDER BY priority ASC
+    </select>
+
+    <!-- 查询所有规则 -->
+    <select id="selectAll" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_rule
+        WHERE deleted = 0
+        ORDER BY priority ASC
+    </select>
+
+    <!-- 插入规则 -->
+    <insert id="insert" parameterType="com.zl.demo.fence.entity.DesensitizationRule">
+        INSERT INTO desensitization_rule (
+            rule_id, rule_name, match_type, match_pattern, field_path, mask_strategy,
+            mask_config, disposition, priority, enabled, scope, rule_version, gray_scope,
+            description, created_at, updated_at, created_by, updated_by, deleted
+        ) VALUES (
+            #{ruleId, jdbcType=VARCHAR},
+            #{ruleName, jdbcType=VARCHAR},
+            #{matchType, jdbcType=VARCHAR},
+            #{matchPattern, jdbcType=VARCHAR},
+            #{fieldPath, jdbcType=VARCHAR},
+            #{maskStrategy, jdbcType=VARCHAR},
+            #{maskConfig, jdbcType=CLOB},
+            #{disposition, jdbcType=VARCHAR},
+            #{priority, jdbcType=INTEGER},
+            #{enabled, jdbcType=INTEGER},
+            #{scope, jdbcType=CLOB},
+            #{ruleVersion, jdbcType=INTEGER},
+            #{grayScope, jdbcType=CLOB},
+            #{description, jdbcType=VARCHAR},
+            #{createdAt, jdbcType=TIMESTAMP},
+            #{updatedAt, jdbcType=TIMESTAMP},
+            #{createdBy, jdbcType=VARCHAR},
+            #{updatedBy, jdbcType=VARCHAR},
+            #{deleted, jdbcType=INTEGER}
+        )
+    </insert>
+
+    <!-- 更新规则 -->
+    <update id="update" parameterType="com.zl.demo.fence.entity.DesensitizationRule">
+        UPDATE desensitization_rule
+        SET rule_name = #{ruleName, jdbcType=VARCHAR},
+            match_type = #{matchType, jdbcType=VARCHAR},
+            match_pattern = #{matchPattern, jdbcType=VARCHAR},
+            field_path = #{fieldPath, jdbcType=VARCHAR},
+            mask_strategy = #{maskStrategy, jdbcType=VARCHAR},
+            mask_config = #{maskConfig, jdbcType=CLOB},
+            disposition = #{disposition, jdbcType=VARCHAR},
+            priority = #{priority, jdbcType=INTEGER},
+            enabled = #{enabled, jdbcType=INTEGER},
+            scope = #{scope, jdbcType=CLOB},
+            rule_version = #{ruleVersion, jdbcType=INTEGER},
+            gray_scope = #{grayScope, jdbcType=CLOB},
+            description = #{description, jdbcType=VARCHAR},
+            updated_at = #{updatedAt, jdbcType=TIMESTAMP},
+            updated_by = #{updatedBy, jdbcType=VARCHAR}
+        WHERE rule_id = #{ruleId, jdbcType=VARCHAR} AND deleted = 0
+    </update>
+
+    <!-- 逻辑删除规则 -->
+    <update id="deleteById">
+        UPDATE desensitization_rule
+        SET deleted = 1,
+            updated_at = SYSTIMESTAMP,
+            updated_by = #{updatedBy}
+        WHERE rule_id = #{ruleId} AND deleted = 0
+    </update>
+
+    <!-- 启用/禁用规则 -->
+    <update id="updateEnabled">
+        UPDATE desensitization_rule
+        SET enabled = #{enabled},
+            updated_at = SYSTIMESTAMP,
+            updated_by = #{updatedBy}
+        WHERE rule_id = #{ruleId} AND deleted = 0
+    </update>
+
+    <!-- 更新规则版本号 -->
+    <update id="updateVersion">
+        UPDATE desensitization_rule
+        SET rule_version = #{ruleVersion},
+            updated_at = SYSTIMESTAMP
+        WHERE rule_id = #{ruleId} AND deleted = 0
+    </update>
+
+    <!-- 统计规则总数 -->
+    <select id="countAll" resultType="int">
+        SELECT COUNT(*)
+        FROM desensitization_rule
+        WHERE deleted = 0
+    </select>
+
+    <!-- 统计启用规则数 -->
+    <select id="countEnabled" resultType="int">
+        SELECT COUNT(*)
+        FROM desensitization_rule
+        WHERE enabled = 1 AND deleted = 0
+    </select>
+
+</mapper>

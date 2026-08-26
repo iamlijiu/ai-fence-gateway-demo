@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI安全围栏建设方案（定稿版 v1.0）</title>
+<style>
+body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;max-width:1000px;margin:0 auto;padding:24px 32px 60px;color:#24292f;line-height:1.7;background:#fff}
+h1{font-size:26px;border-bottom:2px solid #0969da;padding-bottom:8px;color:#0b57d0}
+h2{font-size:21px;border-bottom:1px solid #d0d7de;padding-bottom:6px;margin-top:32px}
+h3{font-size:17px;margin-top:24px;color:#0b57d0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #d0d7de;padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#f0f4fa;font-weight:600}
+tbody tr:nth-child(even){background:#f8fafc}
+tr:hover{background:#eef4ff}
+code{background:#f0f2f5;padding:1px 5px;border-radius:4px;color:#c7254e;font-size:13px}
+pre{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:12px 14px;font-size:12.5px;line-height:1.5;overflow-x:auto}
+blockquote{border-left:4px solid #d0d7de;margin:12px 0;padding:4px 14px;color:#57606a;background:#fafbfc}
+li{margin:4px 0}
+strong{color:#0b57d0}
+</style>
+</head>
+<body>
+
+<h1>AI安全围栏建设方案（定稿版 v1.0）</h1>
+<blockquote><strong>版本</strong>：v1.0 定稿 ｜ <strong>状态</strong>：已合入两轮设计评审结论与全部已确认决策（D1~D6 / E1~E3 / T1~T7）。<br><strong>说明</strong>：【规划】表示二期或远期目标，一期不实现；一期范围以 1.6 节为准。</blockquote>
+
+<h2>1. 背景与目标</h2>
+
+<h3>1.1 需求背景</h3>
+<p>随着人工智能技术在金融领域的深入应用，我司各业务系统广泛对接外部AI模型以提升服务效能，随之而来的敏感数据泄露风险及合规要求却未能及时建设。因此，在开放平台建设AI安全围栏，统一管控AI调用链路，已成为保障金融业务安全、稳定、合规发展的当务之急。</p>
+
+<h3>1.2 名词解释</h3>
+<table>
+<thead><tr><th>术语</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>上行链路</td><td>内网相关系统通过开放平台访问外部模型的数据传输链路</td></tr>
+<tr><td>下行链路</td><td>外部模型执行完后响应回开放平台的数据传输链路</td></tr>
+<tr><td>脱敏</td><td>对敏感数据执行掩码 / 替换 / 删除等处理</td></tr>
+<tr><td>处置策略（disposition）</td><td>命中敏感数据后的顶层决策：拦截 / 脱敏放行 / 替换占位（二期：一致占位、返回后还原）</td></tr>
+<tr><td>旁路观察（dry-run）</td><td>只检测不执行处置，记录"如执行会命中什么"日志，用于验证规则准确性</td></tr>
+<tr><td>同步/异步检测</td><td>同步=响应返回用户前完成检测；异步=旁路检测不阻塞响应（一期下行不做，见 1.6）</td></tr>
+</tbody>
+</table>
+
+<h3>1.3 主要问题</h3>
+<ul>
+<li>上行报文中包含用户隐私数据（手机号、身份证、邮箱等）、企业内部敏感信息（API Key、内部 IP、商业数据等），缺乏统一的脱敏机制，数据直接透传至 AI 模型侧；</li>
+<li>模型返回内容缺乏检测，可能涉及脚本注入和涉政、涉黄、涉恐等违规内容（一期不做，见 1.6）。</li>
+</ul>
+
+<h3>1.4 需求调研</h3>
+<ul>
+<li>7.7 日线下会议同各业务方沟通调研：快乐永赢 app（付荣、齐银银）、设备之家（张智和）、核心系统（刘志伟）；</li>
+<li>7.15 日发起详细问卷调查（AI 大模型安全调研问卷）；</li>
+<li>需求文档：https://www.kdocs.cn/l/cqygmWkoVrjk</li>
+</ul>
+
+<h3>1.5 诉求汇总（定稿）</h3>
+<table>
+<thead><tr><th>环节</th><th>具体诉求</th><th>定稿结论</th></tr></thead>
+<tbody>
+<tr><td>上行</td><td>敏感信息识别与脱敏，覆盖 9 类敏感信息（见 2.6）</td><td>✅ 一期 P0</td></tr>
+<tr><td>上行</td><td>处置策略按业务方可配置</td><td>✅ 已定：一期 block / mask_pass / replace；二期 placeholder / restore_after_return</td></tr>
+<tr><td>上行</td><td>统一流式与非流式接口</td><td>✅ 一期 P0：请求报文统一 JSON（OpenAI 格式，含 stream:true/false）；stream=true 转发后以 SSE 流式返回，stream=false 一次性返回 JSON</td></tr>
+<tr><td>上行</td><td>性能分场景要求</td><td>✅ 已定：见 2.7.1</td></tr>
+<tr><td>上行</td><td>新增管控不可影响原业务</td><td>✅ 回归测试纳入验收（6.2）</td></tr>
+<tr><td>下行</td><td>内容检测（敏感词/脚本注入/涉政涉黄涉恐）</td><td>⏸ <strong>一期不做（D6）</strong>，【规划】</td></tr>
+<tr><td>下行</td><td>旁路/后置异步检测，不阻塞响应</td><td>【规划】</td></tr>
+<tr><td>下行</td><td>违规处置 3 模式（拦截返回/安全改写/仅记录）</td><td>【规划】</td></tr>
+<tr><td>下行</td><td>违规内容通知业务方</td><td>【规划】</td></tr>
+<tr><td>审计</td><td>上行日志：识别、规则命中、脱敏方式、处置结果</td><td>✅ 一期 P0</td></tr>
+<tr><td>审计</td><td>下行违规记录持久化</td><td>【规划】（violation_log 表已设计，见 5.1）</td></tr>
+<tr><td>审计</td><td>统一请求标识全链路关联追溯</td><td>✅ 一期 P0</td></tr>
+<tr><td>审计</td><td>统计分析</td><td>一期基础指标；多维报表二期</td></tr>
+</tbody>
+</table>
+
+<h3>1.6 系统设计目标与一期范围</h3>
+<p><strong>一期范围</strong>：上行链路敏感数据完全管控（P0）+ 必要支撑。已确认决策：</p>
+<ul>
+<li><strong>D1</strong>：规则配置采用"预置规则集 + 基础 CRUD + 校验"最小形态；</li>
+<li><strong>D2</strong>：接入鉴权一期采用 <strong>ZL-OPENID</strong> 简单认证（请求头识别调用方身份，白名单 + 可选静态密钥；网关原无鉴权，必须建设）；<strong>统一流式/非流式接口一期实现</strong>——请求报文统一 JSON（stream:true/false），网关按标志以 SSE 或一次性 JSON 返回；</li>
+<li><strong>D3</strong>：一致占位符 / 返回后还原放二期；</li>
+<li><strong>D4</strong>：9 类敏感信息按金融租赁行业通用做法制定标准（见 2.6）；</li>
+<li><strong>D6</strong>：<strong>一期不做下行内容检测</strong>，仅作为规划目标（语义检测模型行内资源与诉求未定，不设强制指标）。</li>
+</ul>
+<p><strong>模块优先级总表</strong>：</p>
+<table>
+<thead><tr><th>模块</th><th>一期（P0）</th><th>二期（P1）</th><th>规划</th></tr></thead>
+<tbody>
+<tr><td>报文解析</td><td>✅ Header/Body（JSON/Form）、嵌套字段、Prompt 提取（OpenAI 格式）</td><td>XML/gRPC 扩展</td><td>多模态解析</td></tr>
+<tr><td>规则匹配</td><td>✅ 字段路径+全文正则、9 类敏感信息、scope、多规则优先级</td><td>语义识别增强</td><td>—</td></tr>
+<tr><td>敏感请求管控</td><td>✅ 掩码/替换/删除/拦截/报文重组</td><td>一致占位符/返回后还原</td><td>加密脱敏</td></tr>
+<tr><td>异常降级</td><td>✅ reject / passthrough + 降级原因记录</td><td>"提示"模式</td><td>—</td></tr>
+<tr><td>接入鉴权</td><td>✅ ZL-OPENID 简单认证 + <strong>统一流式/非流式接口</strong>（stream 标志路由，SSE/JSON 返回）</td><td>按接口/模型授权</td><td>统一认证体系</td></tr>
+<tr><td>链路标识</td><td>✅ 统一请求标识生成与传递</td><td>—</td><td>—</td></tr>
+<tr><td>日志模块</td><td>✅ 脱敏操作日志</td><td>下行违规日志</td><td>—</td></tr>
+<tr><td>统计监控</td><td>✅ 基础指标（水星日志统计+本地计数）</td><td>多维报表、Prometheus（需技评）</td><td>—</td></tr>
+<tr><td>规则管理</td><td>✅ 最小形态（预置规则+CRUD+校验，热加载≤1s）</td><td>灰度发布/回滚/版本化</td><td>—</td></tr>
+<tr><td>管理后台</td><td>✅ 新建独立应用（E3）</td><td>完整功能</td><td>—</td></tr>
+<tr><td>下行链路全套</td><td>—</td><td>✅ 异步检测/内容检测/结果反馈/告警复核</td><td>语义检测模型</td></tr>
+</tbody>
+</table>
+
+<h3>1.7 合规要求（新增）</h3>
+<ul>
+<li><strong>适用法规</strong>：《个人信息保护法》《数据安全法》《网络安全法》《生成式人工智能服务管理暂行办法》及金融行业标准 JR/T 0197-2020《金融数据安全 数据安全分级指南》、JR/T 0171-2020《个人金融信息保护技术规范》；</li>
+<li><strong>数据出境</strong>：外部模型供应商为<strong>字节火山方舟、阿里百炼</strong>（均国内部署，兼容 OpenAI 接口格式）——<strong>无数据出境风险</strong>；仍需向供应商确认数据留存与训练政策（不将我方数据用于模型训练、明确留存期限）；</li>
+<li><strong>数据分级</strong>：9 类敏感信息清单（2.6）与行内数据分级（L1~L5 / C1~C3）的映射待安全合规确认后发布 v1.1；</li>
+<li><strong>日志原则</strong>：日志中不得保存未脱敏的敏感数据明文；original_hash 仅用于比对审计。</li>
+</ul>
+
+<h2>2. 系统设计</h2>
+
+<h3>2.1 方案对比与选型</h3>
+<p>选型结论：<strong>方案 A（现有网关集成）</strong>，理由与演进路线保留原方案（模块化隔离，为后续拆分独立服务留路径）。</p>
+<p><strong>修正（E3）</strong>：原"无需新增基础设施"不成立——管理后台需<strong>新建独立应用</strong>（原有管理平台前后端一体且与网关不在同一应用），作为新增组件纳入资源变更（5.5）。</p>
+
+<h3>2.2 系统架构</h3>
+<table>
+<thead><tr><th>模块</th><th>职责</th><th>所属组件</th></tr></thead>
+<tbody>
+<tr><td>ZL-OPENID 鉴权</td><td>调用方身份识别与简单认证（一期新增）</td><td>网关层</td></tr>
+<tr><td>报文解析模块</td><td>解析上行请求（OpenAI 兼容格式），提取 Header/Body/Prompt</td><td>网关层</td></tr>
+<tr><td>规则匹配引擎</td><td>按脱敏规则匹配敏感字段（字段路径+正则）</td><td>网关层</td></tr>
+<tr><td>敏感请求管控</td><td>按处置策略执行掩码/替换/删除/拦截，重组报文</td><td>网关层</td></tr>
+<tr><td>规则配置管理</td><td>规则 CRUD、生效/失效、灰度/回滚（二期）</td><td>管理后台（新建）</td></tr>
+<tr><td>脱敏日志模块</td><td>脱敏操作日志、审计追溯</td><td>日志平台</td></tr>
+<tr><td>违规内容检测</td><td>下行内容检测（一期不做）</td><td>【规划】</td></tr>
+<tr><td>告警通知</td><td>违规告警复核、通知业务方</td><td>管理后台（新建）</td></tr>
+</tbody>
+</table>
+<p>架构图沿用原方案 docx 内嵌图（整体架构 / 访问鉴权 / 上行数据脱敏 / 下行检测流程）；其中下行检测流程图标注【规划】。</p>
+
+<h3>2.3 技术选型</h3>
+<table>
+<thead><tr><th>技术点</th><th>选型</th></tr></thead>
+<tbody>
+<tr><td>网关框架</td><td>Spring Boot 2.0.8 + WebFlux 5.0.5（Tomcat 受理 REST 请求）；转发：WebClient（流式 SSE）/ RestTemplate（非流式 JSON）</td></tr>
+<tr><td>插件开发</td><td>Java（响应式链路内实现，全程非阻塞）</td></tr>
+<tr><td>规则存储</td><td>Oracle（主存储） + Apollo（变更信号） + 网关 Caffeine 本地缓存</td></tr>
+<tr><td>模型供应商</td><td>字节火山方舟、阿里百炼（统一 OpenAI 格式适配层）</td></tr>
+<tr><td>日志采集</td><td>水星日志平台</td></tr>
+<tr><td>监控</td><td>一期：水星日志统计 + 本地计数告警；二期：Prometheus（需技评）</td></tr>
+<tr><td>密钥管理</td><td>一期暂不做专门密钥管理（T4 延后）：模型 API Key 存 Apollo（已有访问控制），网关内存加载，禁止落日志；正式密钥体系（加密/KMS）二期</td></tr>
+</tbody>
+</table>
+<p><strong>技术风险提示</strong>：Spring Boot 2.0.x 官方已停止维护（EOL），需评估升级路径；WebFlux 运行于 Tomcat 与纯 Netty 的线程模型不同，SSE 流式场景需在压测中验证首包延迟、背压与 WebClient 连接池表现。</p>
+
+<h3>2.4 功能需求</h3>
+<table>
+<thead><tr><th>功能模块</th><th>功能名称</th><th>优先级</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>接入鉴权</td><td>ZL-OPENID 简单认证</td><td><strong>P0</strong></td><td>请求头识别调用方身份，白名单+可选静态密钥（新增）</td></tr>
+<tr><td>接入鉴权</td><td>统一流式/非流式接口</td><td><strong>P0</strong></td><td>请求统一 JSON（stream:true/false）→ SSE / 一次性 JSON 返回</td></tr>
+<tr><td>规则管理</td><td>规则配置（预置+CRUD+校验）</td><td>P0</td><td>最小形态（D1）</td></tr>
+<tr><td>规则管理</td><td>规则生效范围</td><td>P0</td><td>按路由/业务方/AI模型</td></tr>
+<tr><td>规则管理</td><td>规则热加载</td><td>P0</td><td>变更 ≤1s 生效、无需重启</td></tr>
+<tr><td>规则管理</td><td>规则优先级</td><td>P1</td><td>多规则命中排序</td></tr>
+<tr><td>规则管理</td><td>灰度发布/回滚</td><td>P1</td><td>二期</td></tr>
+<tr><td>脱敏执行</td><td>掩码/替换/删除/拦截</td><td>P0</td><td>掩码如 138\*\*\*\*1234；替换如 [REDACTED]</td></tr>
+<tr><td>脱敏执行</td><td>一致占位符/返回后还原</td><td>P1</td><td>二期（D3）</td></tr>
+<tr><td>脱敏执行</td><td>加密脱敏</td><td>【规划】</td><td>依赖密钥体系</td></tr>
+<tr><td>报文解析</td><td>HTTP Body/Header 解析（JSON/Form）</td><td>P0</td><td>OpenAI 格式适配</td></tr>
+<tr><td>报文解析</td><td>嵌套结构解析</td><td>P1</td><td>JSON 深层字段路径</td></tr>
+<tr><td>日志审计</td><td>脱敏操作日志</td><td>P0</td><td>字段/策略/处置结果/request_id/时间</td></tr>
+<tr><td>日志审计</td><td>统计报表</td><td>P1</td><td>二期多维报表</td></tr>
+<tr><td>管理后台</td><td>规则 CRUD 接口</td><td>P0</td><td>新建应用（E3）</td></tr>
+<tr><td>下行管控</td><td>违规内容检测/告警反馈</td><td>【规划】</td><td>一期不做（D6）</td></tr>
+</tbody>
+</table>
+
+<h3>2.5 规则模型（T2，定稿）</h3>
+<p><strong>职责划分</strong>：<code>disposition</code> = 顶层处置决策；<code>mask_strategy</code> = 具体脱敏手法，仅在 <code>disposition=mask_pass</code> 时生效。</p>
+<table>
+<thead><tr><th>disposition</th><th>一期</th><th>含义</th><th>mask_strategy</th></tr></thead>
+<tbody>
+<tr><td><code>block</code></td><td>✅</td><td>直接拦截请求，返回错误码</td><td>无需</td></tr>
+<tr><td><code>mask_pass</code></td><td>✅</td><td>脱敏后放行</td><td>mask_middle / replace / delete</td></tr>
+<tr><td><code>replace</code></td><td>✅</td><td>替换为统一占位符 [REDACTED] 后放行</td><td>无需</td></tr>
+<tr><td><code>placeholder</code></td><td>⏸ 二期</td><td>一致占位符（跨请求稳定）</td><td>字典表</td></tr>
+<tr><td><code>restore_after_return</code></td><td>⏸ 二期</td><td>返回后还原</td><td>映射表</td></tr>
+</tbody>
+</table>
+<p>规则 JSON 示例：</p>
+<pre>{
+  "rule_id": "rule_001",
+  "rule_name": "手机号脱敏",
+  "match_type": "regex",
+  "match_pattern": "1[3-9]\\d{9}",
+  "field_path": "$.messages[*].content",
+  "disposition": "mask_pass",
+  "mask_strategy": "mask_middle",
+  "mask_config": { "keep_prefix": 3, "mask_char": "*", "keep_suffix": 4 },
+  "priority": 1,
+  "enabled": true,
+  "rule_version": 1,
+  "scope": { "routes": ["route_ai_chat"], "consumers": ["app_system_a"], "models": ["qwen-max"] }
+}</pre>
+<p>校验规则：<code>disposition=block/replace</code> 不允许同时配置 mask_strategy；<code>disposition=mask_pass</code> 必须配置 mask_strategy；非法组合拒绝保存。</p>
+
+<h3>2.6 敏感信息分类清单（D4，v1.0 初稿）</h3>
+<table>
+<thead><tr><th>#</th><th>类别</th><th>典型内容</th><th>默认处置</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>个人身份识别</td><td>姓名、身份证号、护照号</td><td>掩码（身份证留前 6 后 4）</td></tr>
+<tr><td>2</td><td>个人联系方式</td><td>手机号、邮箱、地址、紧急联系人</td><td>掩码（138\*\*\*\*1234）</td></tr>
+<tr><td>3</td><td>金融账户与支付</td><td>银行卡号、支付账号、<strong>密码/验证码/CVV</strong></td><td>银行卡掩码；密码类<strong>直接拦截</strong></td></tr>
+<tr><td>4</td><td>租赁业务信息</td><td>合同号、租金、保证金、租赁物（VIN）</td><td>金额掩码；合同号/租赁物替换占位</td></tr>
+<tr><td>5</td><td>企业身份信息</td><td>统一社会信用代码、法人</td><td>掩码/替换</td></tr>
+<tr><td>6</td><td>企业财务经营</td><td>报表、流水、融资数据</td><td>替换占位；高安全可拦截</td></tr>
+<tr><td>7</td><td>密钥与凭据</td><td>API Key、Token、私钥、密码</td><td><strong>直接拦截</strong></td></tr>
+<tr><td>8</td><td>内部网络信息</td><td>内网 IP、域名、主机名、端口</td><td>替换占位</td></tr>
+<tr><td>9</td><td>商业机密</td><td>风控规则、定价、方案、报价</td><td>替换占位；高安全可拦截</td></tr>
+</tbody>
+</table>
+<p>完整清单（含默认匹配正则、处置判定原则）见《敏感信息分类清单》文档；与行内数据分级映射待安全合规确认（v1.1）。</p>
+
+<h3>2.7 非功能需求</h3>
+<h4>2.7.1 性能（分场景，T7 定稿）</h4>
+<table>
+<thead><tr><th>场景</th><th>调用量</th><th>上行处理时延（P99）</th><th>吞吐影响</th></tr></thead>
+<tbody>
+<tr><td>设备之家-外部客户问答</td><td>10000+ 次/日（压测 100 QPS 起步，可按实际下调）</td><td>≤ 50ms</td><td>≤ 10%</td></tr>
+<tr><td>核心-内部员工问答</td><td>100~1000 次/日</td><td>≤ 100ms</td><td>≤ 15%</td></tr>
+<tr><td>智能-内部内容生成</td><td>100~1000 次/日</td><td>≤ 100ms</td><td>≤ 15%</td></tr>
+</tbody>
+</table>
+<p>单条规则匹配耗时 ≤ 10ms（P99，统一口径）；规则变更生效 ≤ 1s。</p>
+<h4>2.7.2 可用性</h4>
+<table>
+<thead><tr><th>指标</th><th>要求</th></tr></thead>
+<tbody>
+<tr><td>脱敏模块可用性</td><td>≥ 99.9%</td></tr>
+<tr><td>降级策略</td><td>配置为"拒绝请求"或"透传（告警）"（"提示"模式二期）</td></tr>
+<tr><td>故障恢复时间</td><td>≤ 30 分钟</td></tr>
+</tbody>
+</table>
+<h4>2.7.3 可扩展性</h4>
+<p>动态新增规则无需重启；自定义脱敏策略插件化；新增报文格式（XML/gRPC）扩展。</p>
+<h4>2.7.4 可观测性</h4>
+<p>一期：水星日志平台结构化统计 + 本地计数告警；二期：Prometheus 指标暴露（脱敏量/命中量/拦截量/降级量/耗时/规则命中 TOP 等，需技评）。</p>
+<h4>2.7.5 指标统一口径（T6）</h4>
+<table>
+<thead><tr><th>指标</th><th>统一口径</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>单条规则匹配耗时</td><td>≤ 10ms（P99）</td><td>原 10/50/10ms 三处矛盾 → 统一为 10ms；50ms 作为上行处理整体预算组成</td></tr>
+<tr><td>上行安全处理额外耗时</td><td>&lt; 50ms（P99）整体，分场景见 2.7.1</td><td>—</td></tr>
+<tr><td>规则变更生效</td><td>≤ 1 秒、无需重启</td><td>依赖规则热加载（4.3）</td></tr>
+<tr><td>重点敏感字段识别率</td><td>≥ 95%</td><td>测试集口径：9 类 × 正常/变体/伪装样例（见 6.2）</td></tr>
+<tr><td>非敏感字段误修改率</td><td>≤ 0.01%，每日抽检复核</td><td>原"0"不可测量 → 可测量口径</td></tr>
+<tr><td>降级策略执行正确率</td><td>≥ 99.9%，抽样复核</td><td>原"100%"不可测量 → 可测量口径</td></tr>
+<tr><td>请求标识生成率 / 传递完整率</td><td>≥ 99.99% / ≥ 99.9%</td><td>原"100%"微调</td></tr>
+<tr><td>脱敏模块可用性 / 故障恢复</td><td>≥ 99.9% / ≤ 30 分钟</td><td>—</td></tr>
+<tr><td>统计延迟 / 核心指标采集完整率</td><td>≤ 5 分钟 / ≥ 99.9%</td><td>—</td></tr>
+<tr><td>异步任务提交成功率 / 反馈成功率</td><td>≥ 99.9%（二期下行链路）</td><td>二期生效</td></tr>
+</tbody>
+</table>
+
+<h2>3. 接口设计</h2>
+<h3>3.1 ZL-OPENID 鉴权（D2）</h3>
+<table>
+<thead><tr><th>Header</th><th>类型</th><th>必填</th><th>示例</th><th>校验</th></tr></thead>
+<tbody>
+<tr><td><code>ZL-OPENID</code></td><td>String</td><td>是</td><td><code>sbzj_device</code></td><td>非空、≤64 字符、在白名单</td></tr>
+<tr><td><code>ZL-API-KEY</code></td><td>String</td><td>是*</td><td><code>zkey_xxxx</code></td><td>与配置比对一致（*未启用密钥校验时可缺省）</td></tr>
+</tbody>
+</table>
+<p>校验流程：读取 ZL-OPENID → 查白名单缓存（缺失/非法 → 拒绝 401/403，可配置透传+告警）→ 通过则注入 consumer 与安全等级到请求上下文 → 生成 request_id。完整方案见《ZL-OPENID 认证方案》。</p>
+<h3>3.2 脱敏规则管理接口</h3>
+<ul>
+<li><code>POST /api/v1/desensitization/rules</code>（含 disposition / rule_version 字段）</li>
+<li><code>GET /api/v1/desensitization/rules?page=1&amp;page_size=20&amp;route=...</code></li>
+<li><code>PUT /api/v1/desensitization/rules/{rule_id}</code></li>
+<li><code>DELETE /api/v1/desensitization/rules/{rule_id}</code></li>
+<li><code>PATCH /api/v1/desensitization/rules/{rule_id}/status</code>（enabled）</li>
+<li>管理接口鉴权：管理后台访问控制 + 操作留痕（rule_change_log）</li>
+</ul>
+<h3>3.3 统计查询接口</h3>
+<ul><li><code>GET /api/v1/desensitization/stats?start_time=&amp;end_time=&amp;route=&amp;consumer=&amp;model=&amp;rule_id=</code>（一期基础版）</li></ul>
+<h3>3.4 下行检测结果反馈接口【规划】</h3>
+<p>二期定义：回调/MQ 方式异步反馈业务方（含重试、幂等、鉴权）。</p>
+
+<h2>4. 关键方案设计</h2>
+<h3>4.1 访问鉴权（ZL-OPENID）</h3>
+<p>见《ZL-OPENID 认证方案》及 3.1；WebFlux <code>WebFilter</code> 非阻塞实现，在规则匹配/脱敏之前执行。</p>
+<h3>4.2 上行数据脱敏链路</h3>
+<p>请求统一为 JSON（OpenAI 格式 <code>messages[].content</code>，含 <code>stream:true/false</code>）：解析 → 鉴权（ZL-OPENID）→ 规则匹配（字段路径优先+局部正则）→ 处置执行（block/mask_pass/replace）→ 报文重组 → 转发外部模型（火山/阿里，统一适配层）。<strong>转发与返回按 stream 标志分流</strong>：<code>stream=true</code> → WebClient 转发，响应以 SSE 流式返回调用方（ResponseEmitter/Flux 透传）；<code>stream=false</code> → RestTemplate 转发，一次性返回 JSON。一期响应内容仅透传（下行检测二期，含流式分片合并）。</p>
+<h3>4.3 规则存储与热加载（T1）</h3>
+<ol>
+<li>管理后台 CRUD → Oracle 落库（rule_version 自增）；</li>
+<li>更新 Apollo 变更信号（version++）→ 长轮询推送；</li>
+<li>网关拉取全量启用规则（&lt;1000 条，毫秒级）→ 预编译正则 → 重建 Caffeine 缓存；</li>
+<li>下一请求即生效：<strong>≤1s、无需重启</strong>。</li>
+</ol>
+<p>降级：Apollo 不可用 → 用本地缓存（TTL 5 分钟，超期按业务方安全等级 reject/passthrough）；Oracle 拉取失败 → 保留旧缓存+告警；正则编译失败 → 跳过该规则+告警。</p>
+<h3>4.4 异常处理</h3>
+<table>
+<thead><tr><th>场景</th><th>处理策略</th><th>影响范围</th></tr></thead>
+<tbody>
+<tr><td>01 规则配置中心不可用</td><td>本地缓存继续；缓存过期按降级策略</td><td>规则更新延迟</td></tr>
+<tr><td>02 报文解析失败</td><td>记录告警，按降级策略（拒绝/透传）</td><td>当前请求</td></tr>
+<tr><td>03 规则匹配异常（正则超时）</td><td>跳过该规则，记录告警</td><td>当前请求该规则</td></tr>
+<tr><td>04 脱敏执行异常</td><td>记录告警，按降级策略</td><td>当前请求</td></tr>
+<tr><td>05 脱敏日志写入失败</td><td>异步重试，不影响主流程</td><td>日志完整性</td></tr>
+</tbody>
+</table>
+<p>降级模式：<code>reject</code>（拒绝请求，安全要求高场景）/ <code>passthrough</code>（透传+告警，可用性优先场景）；"提示"模式二期。</p>
+<h3>4.5 密钥管理（T4：一期暂不做）</h3>
+<p>✅ 已定：<strong>一期暂不做专门密钥管理</strong>。最小要求：模型 API Key（火山/阿里）与 ZL-API-KEY 存 Apollo（配置中心已有访问控制），网关启动加载到内存，<strong>禁止写入日志/异常信息</strong>；Key 轮换采用人工方式（更新 Apollo + 配置刷新）。正式密钥体系（AES 加密存储、KMS、自动轮换）二期建设；加密脱敏（P2）密钥体系随 KMS 一并设计。</p>
+<h3>4.6 变更三板斧（T5）</h3>
+<table>
+<thead><tr><th>板斧</th><th>一期落地</th></tr></thead>
+<tbody>
+<tr><td>可监控</td><td>水星日志统计 + 本地计数告警；JVM 走猫头鹰；<strong>Prometheus 二期接入（需技评）</strong></td></tr>
+<tr><td>可灰度</td><td>规则 scope 按业务方/路由灰度（先低风险业务方）；全局功能总开关；<strong>旁路观察模式（dry-run）</strong></td></tr>
+<tr><td>可应急</td><td>规则级一键停用（秒级生效）；插件级熔断（异常率超 5% 自动降级透传+告警）；规则版本回退；回滚包；恢复目标 ≤30 分钟（顺序：总开关 → 规则回退 → 插件回退包）</td></tr>
+</tbody>
+</table>
+<h3>4.7 下行内容异步检测【规划】</h3>
+<p>一期不做（D6）。模块设计保留：异步采集、流式分片合并、内容安全检测（规则+语义）、结果反馈（3 模式）、告警复核。<strong>语义检测模型仅作为规划目标</strong>——行内资源与业务诉求未定，不设强制识别率指标；一期聚焦上行管控。</p>
+
+<h2>5. 资源变更</h2>
+<h3>5.1 数据库变更（T3 定稿）</h3>
+<p>四张表（Oracle）：<code>desensitization_rule</code>（含 disposition/rule_version/gray_scope）、<code>desensitization_log</code>（含处置结果/风险等级/耗时/调用方/模型）、<code>violation_log</code>（下行违规记录，二期启用、表先建）、<code>rule_change_log</code>（规则操作审计）。索引与保留周期：日志 180 天（可归档）、违规记录 3 年、规则变更审计 3 年。完整 DDL 见《技术方案 T1~T7》T3。</p>
+<h3>5.2 配置变更</h3>
+<ul>
+<li>Apollo 命名空间 <code>dsh-rule-signal</code>（规则变更信号，仅存版本号）；</li>
+<li>Apollo 密钥密文（模型 API Key、ZL-API-KEY，AES-GCM 加密）；</li>
+<li>ZL-OPENID 白名单与密钥映射（管理后台维护，敏感配置留痕）。</li>
+</ul>
+<h3>5.3 消息订阅变更</h3>
+<p>一期无新增；二期：下行检测任务队列（MQ）。</p>
+<h3>5.4 定时任务变更</h3>
+<p>一期：本地缓存 TTL 刷新守护；二期：统计聚合、违规检测重试、反馈重试。</p>
+<h3>5.5 其他资源变更</h3>
+<ul>
+<li><strong>新增管理后台应用</strong>（E3，独立部署，内网访问控制）；</li>
+<li>网关插件改造（鉴权/解析/匹配/处置/降级）；</li>
+<li>模型侧：申请火山方舟、阿里百炼 API Key，确认数据留存政策。</li>
+</ul>
+
+<h2>6. 验收与测试</h2>
+<h3>6.1 验收标准</h3>
+<table>
+<thead><tr><th>功能</th><th>验收标准</th></tr></thead>
+<tbody>
+<tr><td>规则配置</td><td>API 创建/修改/删除/查询；变更 ≤1s 生效；非法配置拒绝保存</td></tr>
+<tr><td>掩码/替换/删除脱敏</td><td>示例值符合预期；非匹配内容不受影响；误修改率 ≤0.01%（每日抽检）</td></tr>
+<tr><td>拦截</td><td>block 规则命中即拒绝并返回错误码</td></tr>
+<tr><td>ZL-OPENID 鉴权</td><td>白名单校验通过/拒绝符合预期；缺失/非法按配置处置</td></tr>
+<tr><td>热加载</td><td>规则变更 ≤1s 生效、无需重启</td></tr>
+<tr><td>降级</td><td>配置中心不可用时按降级策略执行并记录原因</td></tr>
+<tr><td>日志</td><td>关键安全事件记录率 ≥99.99%；日志不含明文敏感数据</td></tr>
+</tbody>
+</table>
+<h3>6.2 测试方案</h3>
+<ul>
+<li>功能测试：9 类敏感信息 × 正常/变体/伪装样例（构造测试集）；</li>
+<li>性能压测：报文 10KB/100KB × 规则集 50/200 条 × 场景 QPS（设备之家 100 QPS 起步）→ 校验 2.7.1 指标；</li>
+<li>回归测试：开启安全围栏前后业务接口行为对比（不影响原业务）；</li>
+<li>安全对抗：变体绕过（全角/零宽字符/Base64/拼接）、Header 伪造。</li>
+</ul>
+<h3>6.3 上线流程</h3>
+<p>低风险业务方灰度（scope）→ 旁路观察（dry-run 验证规则）→ 全量；应急顺序：总开关 → 规则回退 → 插件回退包。</p>
+
+<h2>7. 二期与规划清单</h2>
+<table>
+<thead><tr><th>项</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>下行链路全套</td><td>异步检测/内容检测/结果反馈/告警复核（P1）</td></tr>
+<tr><td>语义检测模型</td><td>【规划】，行内资源与诉求未定</td></tr>
+<tr><td>一致占位符/返回后还原</td><td>P1（D3），机制需详细设计评审</td></tr>
+<tr><td>加密脱敏</td><td>【规划】，依赖密钥体系</td></tr>
+<tr><td>Prometheus 监控</td><td>二期，需技评</td></tr>
+<tr><td>完整鉴权（统一认证）</td><td>二期</td></tr>
+<tr><td>多维统计报表</td><td>P1</td></tr>
+</tbody>
+</table>
+
+<h2>8. 遗留与待办</h2>
+<ol>
+<li>T1（规则存储热加载）默认采用"Oracle+Apollo 信号+Caffeine"，Redis 方案评估见《技术方案 T1~T7》T1；T4 已定：一期暂不做密钥管理；T6 指标统一已并入 2.7.5；</li>
+<li>9 类敏感信息清单与行内数据分级映射（安全合规确认后发布 v1.1）；</li>
+<li>模型供应商数据留存/训练政策确认（火山、阿里）；</li>
+<li>管理后台新建应用技术评审；</li>
+<li>Prometheus 接入技评（二期）；</li>
+<li>压测 QPS 模型按实际上线负载校准。</li>
+</ol>
+
+</body>
+</html>

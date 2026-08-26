@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI安全围栏 · 待决策清单</title>
+<style>
+body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;max-width:1000px;margin:0 auto;padding:24px 32px 60px;color:#24292f;line-height:1.7;background:#fff}
+h1{font-size:26px;border-bottom:2px solid #0969da;padding-bottom:8px;color:#0b57d0}
+h2{font-size:20px;border-bottom:1px solid #d0d7de;padding-bottom:6px;margin-top:30px}
+h3{font-size:16px;margin-top:22px;color:#0b57d0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #d0d7de;padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#f0f4fa;font-weight:600}
+tbody tr:nth-child(even){background:#f8fafc}
+tr:hover{background:#eef4ff}
+code{background:#f0f2f5;padding:1px 5px;border-radius:4px;color:#c7254e;font-size:13px}
+.tag{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
+.tag-red{background:#fde8e8;color:#c0392b}
+.tag-yellow{background:#fef7e0;color:#b7791f}
+.tag-blue{background:#e8f0fe;color:#1a56db}
+.tag-green{background:#e6f6e6;color:#1e7e34}
+.note{background:#fff8e6;border:1px solid #f0d9a0;border-radius:6px;padding:10px 14px;margin:14px 0;font-size:13.5px}
+.ok{color:#1e7e34;font-weight:600}
+strong{color:#0b57d0}
+</style>
+</head>
+<body>
+
+<h1>AI安全围栏 · 待决策清单</h1>
+<p>按"是否阻塞一期开工"分三档。标注 <span class="tag tag-red">开工前必定</span> 的项不落地，一期需求/开发无法定稿；<span class="tag tag-yellow">一期内落实</span> 的项影响设计定稿；<span class="tag tag-blue">需外部确认</span> 的项由你找对应部门收集信息后回来确认。</p>
+
+<h2>第一档：开工前必定（5 项，全部来自一期范围表 D1~D6）</h2>
+
+<table>
+<thead><tr><th>编号</th><th>要确定的内容</th><th>选项</th><th>我的建议</th><th>阻塞什么</th></tr></thead>
+<tbody>
+<tr><td><b>D1</b></td><td>一期规则配置的最小形态（文档 1.3"不做规则配置化"与 2.3.1"规则配置 P0"矛盾）</td><td>A. 预置规则集+基础 CRUD 接口；B. 直接改库/配置文件+Apollo 推送</td><td>选 A（可运维、成本可控）<br><span class="ok">✅ 已定：预置规则集 + 基础 CRUD + 校验</span></td><td>规则管理模块开发量、管理后台范围</td></tr>
+<tr><td><b>D2</b></td><td>一期是否复用现有网关鉴权（接入鉴权模块标 P1）</td><td>A. 复用现有鉴权，一期只加请求标识；B. 一期就做统一流式/非流式地址+业务方识别</td><td>默认 A；若设备之家要求一期统一接口地址则选 B<br><span class="ok">✅ 已定：请求头增加自定义 ZL-OPENID 参数识别调用方身份，初期采用简单认证（一期做基础身份识别，完整鉴权二期）；统一流式/非流式接口一期实现（请求统一 JSON，stream 标志分流 SSE/JSON 返回）</span></td><td>是否需要新增鉴权开发、设备之家接入排期</td></tr>
+<tr><td><b>D3</b></td><td>"一致占位符 / 返回后还原"是否进一期（v2 标 P0）</td><td>A. 一期；B. 二期（等详细设计）</td><td>选 B（跨会话泄露等机制未设计，风险高）<br><span class="ok">✅ 已定：占位符 / 还原放二期</span></td><td>一期验收边界、敏感请求管控模块范围</td></tr>
+<tr><td><b>D4</b></td><td>"9 类敏感信息"是哪 9 类（清单+默认规则+默认处置）</td><td>业务+安全共同确认清单</td><td>先出初稿（见文末说明）再确认<br><span class="ok">✅ 已定：科技侧驱动，按金融租赁行业通用做法定标准，清单见《敏感信息分类清单》</span></td><td>初始规则集、规则匹配 P0 验收（识别率≥95%）</td></tr>
+<tr><td><b>D6</b></td><td>一期不做下行检测是否可接受（背景列为核心问题，但模块均标 P1）</td><td>A. 一期仅上行，下行二期；B. 一期追加基础敏感词检测</td><td>选 A（聚焦上行，下行整套需双通道设计）<br><span class="ok">✅ 已定：一期确认不做下行内容检测；语义检测模型行内资源与诉求未定，仅作【规划】目标，不设强制指标</span></td><td>一期交付边界、业务方预期管理</td></tr>
+</tbody>
+</table>
+
+<h2>第二档：一期设计定稿前要落实（技术决策，可先由我起草方案你确认）</h2>
+<p><span class="ok">✅ 状态：T2 / T3 / T7 已确认按方案执行；T5 熔断阈值 5% 保留但一期不接 Prometheus（上技评，监控改水星日志统计+本地计数）；T1 / T4 / T6 待确认。详见《技术方案 T1~T7》。</span></p>
+
+<table>
+<thead><tr><th>项</th><th>要确定的内容</th><th>来源</th><th>我可以直接帮你做的</th></tr></thead>
+<tbody>
+<tr><td>T1</td><td>规则存储主从：Oracle 为主 + Apollo 变更通知？热加载机制（缓存失效/推送失败处理）</td><td>评审 P0-1</td><td>起草"规则发布→生效"数据流与缓存设计</td></tr>
+<tr><td>T2</td><td>规则模型补 <code>disposition</code> 字段（直接拒绝/脱敏放行/占位符/还原），同步改 rule JSON 与 desensitization_rule 表</td><td>评审 N2/P0-6</td><td>修订规则 JSON 示例 + 表 DDL</td></tr>
+<tr><td>T3</td><td>表设计补齐：violation_log 违规记录表、日志表补"处置结果/风险等级/耗时"字段、original_hash 算法（SHA-256+盐）、规则表版本/灰度字段、索引与保留周期</td><td>评审 P0-6</td><td>补完整 DDL 建议</td></tr>
+<tr><td>T4</td><td>密钥管理：至少一期涉及的模型侧 API Key 保管与注入方式（加密脱敏密钥二期再定）</td><td>评审 P0-5</td><td>起草最小方案（KMS/环境注入，禁止明文落库落日志）</td></tr>
+<tr><td>T5</td><td>变更三板斧补齐：可灰度（按业务方 scope+总开关+旁路观察模式）、可应急（规则一键停用+插件熔断+回滚流程）</td><td>评审 P0-7</td><td>起草开关/灰度/回滚方案</td></tr>
+<tr><td>T6</td><td>指标口径统一：单条规则匹配耗时（10ms vs 50ms 三处矛盾）、"100%"类指标改可测量口径</td><td>评审 P1-1</td><td>给出统一后的指标表，直接改文档</td></tr>
+<tr><td>T7</td><td>分场景性能指标表（D5）：设备之家 1万+/日 vs 内部问答 100~1000/日 的时延/吞吐指标</td><td>评审 N6/D5</td><td>起草分场景指标表初稿</td></tr>
+</tbody>
+</table>
+
+<h2>第三档：需向外部收集信息（你去找人，回来后告诉我结论）</h2>
+
+<table>
+<thead><tr><th>项</th><th>要收集/确认的信息</th><th>找谁</th><th>为什么重要</th></tr></thead>
+<tbody>
+<tr><td>E1</td><td>外部 AI 模型供应商清单 + 部署地域（是否涉及数据出境）</td><td>业务/采购 + 法务合规</td><td>决定脱敏策略下限（最高等级数据可能需直接拦截而非脱敏放行）</td></tr>
+<tr><td>E2</td><td>现有网关能力盘点：SSE 流式支持？插件机制是否已存在？现有鉴权方式？</td><td>网关/平台负责人</td><td>决定方案 A 的真实工作量（1~2 周评估是否成立）、D2 结论、流式方案设计</td></tr>
+<tr><td>E3</td><td>管理后台：复用现有平台还是新建</td><td>平台负责人</td><td>影响"方案A不新增组件"的成立性（T2/T3 的落地载体）</td></tr>
+<tr><td>E4</td><td>语义检测模型来源（供应商/自研/开源）——二期用，可提前物色</td><td>安全团队/算法团队</td><td>影响二期成本与误报率控制机制</td></tr>
+<tr><td>E5</td><td>各业务场景对"脱敏后 AI 能力降级"的容忍度（哪些场景必须真实数据）</td><td>三个业务方</td><td>影响处置策略默认值（D3 相关）、业务影响评估</td></tr>
+</tbody>
+</table>
+
+<h2>建议行动顺序</h2>
+<ol>
+<li><b>今天就定第一档 D1/D2/D3/D6</b>（你 + 业务方，半小时的会）；D4 用我给的初稿快速过一遍。</li>
+<li><b>同步派活收集第三档 E1/E2/E3</b>（并行找人，不阻塞你定范围）。</li>
+<li><b>第二档 T1~T7 交给我起草方案</b>（表 DDL、规则模型、密钥、三板斧、指标表），你逐项确认即可，不需要从零想。</li>
+<li>第一档定完 + E2（网关能力）回来后，我帮你把《AI安全围栏建设方案》修订一版（补齐 P0 缺口、统一矛盾），再进入详细设计。</li>
+</ol>
+
+<div class="note">📌 <b>D4 初稿参考（9 类敏感信息）</b>：①手机号 ②身份证号 ③姓名 ④邮箱 ⑤银行卡号 ⑥地址（家庭/公司）⑦API Key/密钥 ⑧内部 IP/域名 ⑨商业敏感数据（金额/交易对手）。默认处置：①~⑤掩码，⑥~⑨替换为占位；需业务方确认清单与默认处置是否符合实际。</div>
+
+</body>
+</html>

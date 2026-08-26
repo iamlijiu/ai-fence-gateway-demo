@@ -1,0 +1,152 @@
+{
+  "version": "1.0.0",
+  "description": "AI安全围栏预置规则集（金融租赁行业通用标准）",
+  "rules": [
+    {
+      "rule_id": "rule_001",
+      "rule_name": "身份证号脱敏",
+      "match_type": "regex",
+      "match_pattern": "\\d{17}[\\dXx]",
+      "field_path": "$.messages[*].content",
+      "disposition": "mask_pass",
+      "mask_strategy": "mask_middle",
+      "mask_config": {
+        "keep_prefix": 6,
+        "keep_suffix": 4,
+        "mask_char": "*"
+      },
+      "priority": 5,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配18位身份证号（最后一位可以是X），保留前6位后4位，中间用*替换"
+    },
+    {
+      "rule_id": "rule_002",
+      "rule_name": "手机号脱敏",
+      "match_type": "regex",
+      "match_pattern": "(?<!\\d)1[3-9]\\d{9}(?!\\d)",
+      "field_path": "$.messages[*].content",
+      "disposition": "mask_pass",
+      "mask_strategy": "mask_middle",
+      "mask_config": {
+        "keep_prefix": 3,
+        "keep_suffix": 4,
+        "mask_char": "*"
+      },
+      "priority": 10,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配11位手机号（13x-19x开头），使用负向前瞻避免匹配身份证号子串"
+    },
+    {
+      "rule_id": "rule_003",
+      "rule_name": "邮箱脱敏",
+      "match_type": "regex",
+      "match_pattern": "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}",
+      "field_path": "$.messages[*].content",
+      "disposition": "mask_pass",
+      "mask_strategy": "mask_middle",
+      "mask_config": {
+        "keep_prefix": 1,
+        "keep_suffix": 0,
+        "mask_char": "*"
+      },
+      "priority": 20,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配标准邮箱格式，保留第1个字符，其余用*替换"
+    },
+    {
+      "rule_id": "rule_004",
+      "rule_name": "银行卡号脱敏",
+      "match_type": "regex",
+      "match_pattern": "[1-9]\\d{15,18}",
+      "field_path": "$.messages[*].content",
+      "disposition": "mask_pass",
+      "mask_strategy": "mask_middle",
+      "mask_config": {
+        "keep_prefix": 4,
+        "keep_suffix": 4,
+        "mask_char": "*"
+      },
+      "priority": 15,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配16-19位银行卡号，保留前4位后4位，中间用*替换"
+    },
+    {
+      "rule_id": "rule_005",
+      "rule_name": "密码验证码拦截",
+      "match_type": "regex",
+      "match_pattern": "(密码|验证码|password|token)[：: =]+\\S+",
+      "field_path": "$.messages[*].content",
+      "disposition": "block",
+      "mask_strategy": null,
+      "mask_config": null,
+      "priority": 1,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配包含密码/验证码/token关键词的内容，直接拦截请求（高危信息）"
+    },
+    {
+      "rule_id": "rule_006",
+      "rule_name": "API Key拦截",
+      "match_type": "regex",
+      "match_pattern": "(sk\\-[A-Za-z0-9]{20,}|Bearer\\s+[A-Za-z0-9._~+/\\-]+=*)",
+      "field_path": "$.messages[*].content",
+      "disposition": "block",
+      "mask_strategy": null,
+      "mask_config": null,
+      "priority": 2,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配OpenAI API Key（sk-开头20+字符）或Bearer Token，直接拦截"
+    },
+    {
+      "rule_id": "rule_007",
+      "rule_name": "内网IP替换",
+      "match_type": "regex",
+      "match_pattern": "(10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3})",
+      "field_path": "$.messages[*].content",
+      "disposition": "replace",
+      "mask_strategy": "replace",
+      "mask_config": null,
+      "priority": 30,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配内网IP地址（10.x/172.16-31.x/192.168.x），替换为[REDACTED]"
+    },
+    {
+      "rule_id": "rule_008",
+      "rule_name": "统一社会信用代码脱敏",
+      "match_type": "regex",
+      "match_pattern": "[0-9A-HJ-NPQRTUWXY]{18}",
+      "field_path": "$.messages[*].content",
+      "disposition": "mask_pass",
+      "mask_strategy": "mask_middle",
+      "mask_config": {
+        "keep_prefix": 2,
+        "keep_suffix": 4,
+        "mask_char": "*"
+      },
+      "priority": 25,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配18位统一社会信用代码，保留前2位后4位，中间用*替换"
+    },
+    {
+      "rule_id": "rule_009",
+      "rule_name": "HTML标签删除",
+      "match_type": "regex",
+      "match_pattern": "<[^>]+>",
+      "field_path": "$.messages[*].content",
+      "disposition": "delete",
+      "mask_strategy": "delete",
+      "mask_config": null,
+      "priority": 35,
+      "enabled": true,
+      "scope": {},
+      "description": "匹配HTML标签（<...>），直接删除标签内容（保留文本）"
+    }
+  ]
+}

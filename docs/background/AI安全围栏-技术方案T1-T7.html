@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI安全围栏 · 技术方案（T1~T7）</title>
+<style>
+body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;max-width:1000px;margin:0 auto;padding:24px 32px 60px;color:#24292f;line-height:1.7;background:#fff}
+h1{font-size:26px;border-bottom:2px solid #0969da;padding-bottom:8px;color:#0b57d0}
+h2{font-size:20px;border-bottom:1px solid #d0d7de;padding-bottom:6px;margin-top:30px}
+h3{font-size:16px;margin-top:22px;color:#0b57d0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #d0d7de;padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#f0f4fa;font-weight:600}
+tbody tr:nth-child(even){background:#f8fafc}
+tr:hover{background:#eef4ff}
+code{background:#f0f2f5;padding:1px 5px;border-radius:4px;color:#c7254e;font-size:13px}
+pre{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:12px 14px;font-size:12.5px;line-height:1.5;overflow-x:auto;color:#24292f}
+.note{background:#fff8e6;border:1px solid #f0d9a0;border-radius:6px;padding:10px 14px;margin:14px 0;font-size:13.5px}
+.tag{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
+.tag-red{background:#fde8e8;color:#c0392b}
+.ok{color:#1e7e34;font-weight:600}
+strong{color:#0b57d0}
+</style>
+</head>
+<body>
+
+<h1>AI安全围栏 · 技术方案（T1~T7）</h1>
+
+<h2>设计输入（E1/E2/E3 结论）</h2>
+<table>
+<thead><tr><th>项</th><th>结论</th><th>对设计的影响</th></tr></thead>
+<tbody>
+<tr><td>E1 模型供应商</td><td>字节火山方舟、阿里百炼（均国内、兼容 OpenAI 接口格式）</td><td>无数据出境风险；报文解析可复用 OpenAI 协议（<code>messages[].content</code> 提取 Prompt）；网关模型适配层统一 OpenAI 格式即可；仍需向供应商确认数据留存/训练政策</td></tr>
+<tr><td>E2 网关现状</td><td>Spring Boot 2.0.8 + WebFlux 5.0.5（Tomcat 受理 REST）；转发：WebClient（流式 SSE）/ RestTemplate（非流式 JSON）；无鉴权</td><td>插件必须非阻塞；<b>统一流式/非流式接口一期实现</b>（请求统一 JSON，stream:true/false 分流：true→WebClient+SSE 返回，false→RestTemplate+JSON 返回）；WebClient 注意背压与连接池；ZL-OPENID 鉴权一期必做；Spring Boot 2.0.x 已 EOL，建议评估升级</td></tr>
+<tr><td>E3 管理平台</td><td>原平台前后端一体且不在同一应用，需新建</td><td>修正"方案A不新增组件"：新增独立管理后台应用（规则 CRUD + 告警复核 + 灰度/回滚操作），与网关分离部署，走内网访问控制</td></tr>
+</tbody>
+</table>
+
+<h2>T1 规则存储与热加载</h2>
+<h3>存储分层</h3>
+<table>
+<thead><tr><th>层</th><th>组件</th><th>职责</th></tr></thead>
+<tbody>
+<tr><td>主存储</td><td>Oracle（desensitization_rule 表）</td><td>规则数据唯一权威，管理后台 CRUD 落库</td></tr>
+<tr><td>变更通知</td><td>Apollo 命名空间（如 <code>dsh-rule-signal</code>）</td><td>只存"规则版本号/变更信号"，不做规则全量（避免 Apollo 容量问题）</td></tr>
+<tr><td>本地缓存</td><td>网关进程内 Caffeine</td><td>规则生效副本，请求匹配只读本地缓存，零网络 IO</td></tr>
+</tbody>
+</table>
+<h3>规则发布 → 生效 数据流</h3>
+<ol>
+<li>管理后台新增/修改/启停规则 → 写入 Oracle（带 rule_version 自增）；</li>
+<li>后台更新 Apollo 变更信号（version++）→ 长轮询推送；</li>
+<li>网关收到信号 → 从 Oracle 拉取全量启用规则（量级 &lt;1000 条，全量拉取毫秒级）→ 预编译正则 → 重建 Caffeine 缓存；</li>
+<li>下一请求即用新规则 → <b>≤1 秒生效、无需重启</b>（满足指标）。</li>
+</ol>
+<h3>异常降级</h3>
+<ul>
+<li>Apollo 不可用：继续使用本地缓存（含 TTL 策略，默认 5 分钟，超期未刷新则按业务方安全等级走 reject/passthrough 降级）；</li>
+<li>Oracle 拉取失败：保留旧缓存 + 告警，规则更新延迟；</li>
+<li>正则预编译失败：该规则跳过 + 告警日志，不影响其他规则（异常场景 03 兜底）。</li>
+</ul>
+<h3>性能设计</h3>
+<ul>
+<li>正则预编译缓存（Pattern 池），避免每次匹配重新编译；</li>
+<li>规则索引：按 route/consumer/model 分组（scope 预过滤），命中组后再逐条匹配，减少无效正则扫描；</li>
+<li>字段路径优先：先按字段路径定位，再做局部正则（避免全文正则全报文扫描），配合 T7 性能压测达标。</li>
+</ul>
+<h3>方案评估：是否引入 Redis（对比结论）</h3>
+<table>
+<thead><tr><th>维度</th><th>A：现状（Oracle+Apollo 信号+Caffeine）</th><th>B：引入 Redis（规则快照+Pub/Sub）</th></tr></thead>
+<tbody>
+<tr><td>新增组件</td><td>无（全部为现有组件）</td><td>Redis（需确认行内已有且运维成熟）</td></tr>
+<tr><td>读路径</td><td>本地内存，0 网络 IO（最快）</td><td>本地 Caffeine + Redis 兜底</td></tr>
+<tr><td>变更通知</td><td>Apollo ReleaseMessage 推送（秒级，<b>需确认客户端轮询/推送配置</b>，默认可能 60s 轮询，不配置则"1s 生效"不成立）</td><td>Redis Pub/Sub 即时广播，通道可控</td></tr>
+<tr><td>多实例一致性</td><td>各实例各自监听信号 → 各自拉 Oracle 全量（规则 &lt;1000 条，毫秒级，可接受）</td><td>共享一份快照，实例扩容无状态，一致窗口更小</td></tr>
+<tr><td>故障面</td><td>Apollo/Oracle 故障 → 本地缓存 TTL 兜底（默认 5 分钟）</td><td>Redis 故障 → 本地缓存 TTL + Oracle 直查兜底（多一层依赖）</td></tr>
+<tr><td>二期复用</td><td>无</td><td>占位符字典 / 还原映射（二期 D3）可直接复用 Redis</td></tr>
+</tbody>
+</table>
+<p><b>评估结论</b>：</p>
+<ol>
+<li>规则量 &lt;1000 条、变更低频，<b>性能不是引入 Redis 的理由</b>（两方案读路径都是本地缓存）；关键在<b>变更通知的实时性与多实例一致性</b>；</li>
+<li><b>现状方案（A）在一期默认采用</b>，前提：① 网关实例数 ≤3~5；② <b>验证 Apollo 推送延迟可配置到秒级</b>（不满足则"1s 生效"指标不成立，需改用短轮询或换通知通道）；③ 规则量 &lt;1000 条成立；</li>
+<li>若网关<b>多实例（&gt;5）或规则变更频繁</b>、或行内 Redis 现成，<b>引入 Redis（B）更稳</b>：推荐形态"Oracle 主 + Redis 规则快照/Pub/Sub 信号 + 网关 Caffeine 读缓存"——<b>网关不直接读 Redis</b>（多一跳网络 IO 且 Redis 故障即全链路不可用），Redis 故障降级到本地缓存 + Oracle 直查；</li>
+<li>二期占位符字典 / 还原映射若确定要共享存储，届时引入 Redis 收益最大，可作为二期决策点。</li>
+</ol>
+
+<h2>T2 规则模型（disposition 字段）</h2>
+<p><b>职责划分</b>：<code>disposition</code> = 顶层处置决策（脱敏后放行 / 拦截 / 替换占位）；<code>mask_strategy</code> = 具体脱敏手法，仅在 <code>disposition=mask_pass</code> 时生效。解决原模型"4 种处置无法表达"的问题。</p>
+<table>
+<thead><tr><th>disposition</th><th>一期</th><th>含义</th><th>mask_strategy</th></tr></thead>
+<tbody>
+<tr><td><code>block</code></td><td>✅</td><td>直接拦截请求，返回错误码</td><td>无需</td></tr>
+<tr><td><code>mask_pass</code></td><td>✅</td><td>脱敏后放行</td><td>mask_middle / replace / delete</td></tr>
+<tr><td><code>replace</code></td><td>✅</td><td>替换为统一占位符（<code>[REDACTED]</code>）后放行</td><td>无需（等价原"替换脱敏"）</td></tr>
+<tr><td><code>placeholder</code></td><td>⏸ 二期</td><td>一致占位符（跨请求稳定，伪匿名化）</td><td>字典表</td></tr>
+<tr><td><code>restore_after_return</code></td><td>⏸ 二期</td><td>返回后还原</td><td>映射表</td></tr>
+</tbody>
+</table>
+<h3>规则 JSON 示例（更新版）</h3>
+<pre>{
+  "rule_id": "rule_001",
+  "rule_name": "手机号脱敏",
+  "match_type": "regex",
+  "match_pattern": "1[3-9]\\d{9}",
+  "field_path": "$.messages[*].content",   // OpenAI 兼容格式
+  "disposition": "mask_pass",
+  "mask_strategy": "mask_middle",
+  "mask_config": { "keep_prefix": 3, "mask_char": "*", "keep_suffix": 4 },
+  "priority": 1,
+  "enabled": true,
+  "rule_version": 1,
+  "scope": { "routes": ["route_ai_chat"], "consumers": ["app_system_a"], "models": ["qwen-max"] }
+}</pre>
+<pre>{
+  "rule_id": "rule_002",
+  "rule_name": "API密钥拦截",
+  "match_type": "regex",
+  "match_pattern": "(sk-[A-Za-z0-9]{20,})",
+  "disposition": "block",
+  "priority": 0,
+  "enabled": true,
+  "rule_version": 1,
+  "scope": { "routes": ["route_ai_chat"], "consumers": [] }
+}</pre>
+<p>校验规则：<code>disposition=block/replace</code> 时不允许同时配置 mask_strategy（或忽略）；<code>disposition=mask_pass</code> 时必须配置 mask_strategy；非法组合拒绝保存（对应 2.3.2"非法配置拒绝保存"验收）。</p>
+<p><span class="ok">✅ 已确认：disposition=replace 与原"替换脱敏"归并可接受（T2）</span></p>
+
+<h2>T3 数据库设计（Oracle DDL 建议）</h2>
+<h3>3.1 desensitization_rule（增列：disposition / rule_version / gray_scope / 审计字段）</h3>
+<pre>CREATE TABLE desensitization_rule (
+  rule_id        VARCHAR2(64)   NOT NULL,
+  rule_name      VARCHAR2(128)  NOT NULL,
+  match_type     VARCHAR2(32)   NOT NULL,  -- regex / field_path / custom
+  match_pattern  VARCHAR2(512),
+  field_path     VARCHAR2(256),
+  mask_strategy  VARCHAR2(32),             -- mask_middle / replace / delete（encrypt 二期）
+  mask_config    CLOB,
+  disposition    VARCHAR2(32)   NOT NULL,  -- mask_pass / block / replace（二期扩展）
+  priority       NUMBER(5)      NOT NULL,
+  enabled        NUMBER(1)      NOT NULL,
+  scope          CLOB,                     -- JSON: routes/consumers/models
+  rule_version   NUMBER(10)     DEFAULT 1 NOT NULL,  -- 灰度/回滚
+  gray_scope     CLOB,                     -- JSON: 灰度范围（空=全量）
+  created_at     TIMESTAMP      NOT NULL,
+  updated_at     TIMESTAMP      NOT NULL,
+  created_by     VARCHAR2(64)   NOT NULL,
+  updated_by     VARCHAR2(64),
+  deleted        NUMBER(1)      DEFAULT 0 NOT NULL,
+  CONSTRAINT pk_des_rule PRIMARY KEY (rule_id)
+);</pre>
+<h3>3.2 desensitization_log（补处置结果/风险等级/耗时/模型/调用方）</h3>
+<pre>CREATE TABLE desensitization_log (
+  log_id             VARCHAR2(64)  NOT NULL,
+  request_id         VARCHAR2(64)  NOT NULL,
+  rule_id            VARCHAR2(64)  NOT NULL,
+  field_path         VARCHAR2(256),
+  mask_strategy      VARCHAR2(32),
+  disposition        VARCHAR2(32),             -- 规则配置的处置策略
+  disposition_result VARCHAR2(32)  NOT NULL,   -- 实际结果: pass/blocked/degraded/passthrough
+  risk_level         VARCHAR2(16),             -- 高/中/低
+  original_hash      VARCHAR2(128),            -- SHA-256(系统盐+原文)，仅比对审计
+  cost_ms            NUMBER(10),
+  route              VARCHAR2(128)  NOT NULL,
+  consumer           VARCHAR2(128),            -- ZL-OPENID 调用方标识
+  model              VARCHAR2(128),
+  timestamp          TIMESTAMP      NOT NULL,
+  CONSTRAINT pk_des_log PRIMARY KEY (log_id)
+);
+CREATE INDEX idx_des_log_req  ON desensitization_log (request_id);
+CREATE INDEX idx_des_log_rt   ON desensitization_log (route, timestamp);
+CREATE INDEX idx_des_log_cons ON desensitization_log (consumer, timestamp);
+CREATE INDEX idx_des_log_rule ON desensitization_log (rule_id, timestamp);</pre>
+<h3>3.3 violation_log（新增，下行违规记录，二期启用、表先建）</h3>
+<pre>CREATE TABLE violation_log (
+  violation_id    VARCHAR2(64)  NOT NULL,
+  request_id      VARCHAR2(64)  NOT NULL,
+  model           VARCHAR2(128),
+  route           VARCHAR2(128),
+  consumer        VARCHAR2(128),
+  violation_type  VARCHAR2(64)  NOT NULL,  -- sensitive_word/script_injection/politics/porn/terror...
+  risk_level      VARCHAR2(16)  NOT NULL,
+  content_hash    VARCHAR2(128),           -- 违规内容哈希，不存明文
+  hit_snippet     VARCHAR2(512),           -- 脱敏后的命中片段（限长）
+  detect_mode     VARCHAR2(16),            -- rule / semantic
+  feedback_status VARCHAR2(16),            -- pending / sent / failed
+  created_at      TIMESTAMP     NOT NULL,
+  CONSTRAINT pk_violation PRIMARY KEY (violation_id)
+);
+CREATE INDEX idx_viol_req  ON violation_log (request_id);
+CREATE INDEX idx_viol_type ON violation_log (violation_type, created_at);</pre>
+<h3>3.4 rule_change_log（新增，规则操作审计）</h3>
+<pre>CREATE TABLE rule_change_log (
+  change_id     VARCHAR2(64) NOT NULL,
+  rule_id       VARCHAR2(64) NOT NULL,
+  action        VARCHAR2(16) NOT NULL,  -- create/update/delete/enable/disable/gray/rollback
+  rule_version  NUMBER(10),
+  operator      VARCHAR2(64) NOT NULL,
+  change_detail CLOB,                   -- 变更前后 JSON 快照
+  created_at    TIMESTAMP   NOT NULL,
+  CONSTRAINT pk_rule_change PRIMARY KEY (change_id)
+);
+CREATE INDEX idx_rule_chg ON rule_change_log (rule_id, created_at);</pre>
+<h3>3.5 其他约定</h3>
+<ul>
+<li><b>original_hash</b>：SHA-256(系统级固定盐 + 原值)，不可逆、仅用于"疑似值比对"审计；手机号/身份证为低熵数据，仍可被枚举破解，需结合库表访问控制与最小权限使用（声明为"去标识化辅助"，不视为绝对匿名）；</li>
+<li><b>保留周期</b>：desensitization_log 180 天（可归档冷存储）；violation_log 与 rule_change_log 3 年（对应"违规记录持久化保存"与审计要求）；</li>
+<li>统计查询以 (route/consumer/model/rule + 时间) 走索引；月级聚合可引入汇总表（二期统计模块落地）。</li>
+</ul>
+<p><span class="ok">✅ 已确认：表设计按本方案先行（T3），保留周期等后续按行内审计要求调整</span></p>
+
+<h2>T4 密钥管理（一期暂不做）</h2>
+<div class="note">✅ <b>已定（延后）</b>：<b>一期暂不做专门密钥管理</b>。最小要求：模型 API Key（火山/阿里）与 ZL-API-KEY 存 Apollo（配置中心已有访问控制），网关启动加载到内存，<b>禁止写入日志/异常信息</b>；Key 轮换人工执行（更新 Apollo + 配置刷新）。正式密钥体系（AES 加密存储、KMS、自动轮换）二期建设；加密脱敏（P2）密钥体系随 KMS 一并设计。</div>
+<table>
+<thead><tr><th>项</th><th>方案</th></tr></thead>
+<tbody>
+<tr><td>管理范围</td><td>外部模型 API Key（火山方舟、阿里百炼）、ZL-API-KEY 静态密钥</td></tr>
+<tr><td>存储</td><td>Apollo 配置中心存<b>密文</b>（AES-256-GCM；加密主密钥经环境变量注入网关进程，不入库、不入代码库）</td></tr>
+<tr><td>加载</td><td>网关启动/配置刷新时解密加载到内存，模型调用从内存读取；日志/异常/监控<b>禁止输出明文</b></td></tr>
+<tr><td>轮换</td><td>Apollo 更新 → 双密钥窗口（新旧并行 5 分钟）→ 验证新密钥后下线旧密钥，全程告警留痕</td></tr>
+<tr><td>一期不引入</td><td>独立 KMS 服务（评估二期接入行内密钥服务）；加密脱敏（P2）所需密钥体系随 KMS 一并设计</td></tr>
+</tbody>
+</table>
+
+<h2>T5 变更三板斧</h2>
+<table>
+<thead><tr><th>板斧</th><th>一期落地</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><b>可监控</b></td><td>✅ 一期简化版</td><td>⚠️ <b>Prometheus 接入需上技评，一期暂不接</b>。一期以<b>水星日志平台</b>结构化日志统计 + 本地轻量计数（异常率/降级量阈值触发日志告警）替代；JVM 走猫头鹰（已有）。Prometheus 指标暴露（脱敏量/命中量/拦截量/降级量/耗时/规则命中 TOP 等）待技评通过后二期接入，对应 2.4.4 可观测性需求调整</td></tr>
+<tr><td><b>可灰度</b></td><td>✅ 补上</td><td>① 规则 scope 按业务方/路由灰度（先灰度低风险业务方）；② 全局功能总开关（<code>security-fence.enabled</code>，一键整体启停）；③ <b>旁路观察模式（dry-run）</b>：只检测不执行处置，记录"如执行会命中什么"日志，验证规则准确性后再开执行</td></tr>
+<tr><td><b>可应急</b></td><td>✅ 补上</td><td>① 规则级一键停用（管理后台/应急开关，秒级生效，走 Apollo 信号）；② 插件级熔断：处理异常率超阈值（如 5% ✅ 已确认）自动降级为透传+告警（一期基于本地计数触发，二期接入 Prometheus 指标触发）；③ 规则版本回退（gray_scope + rule_version）；④ 回退包 + 30 分钟恢复目标流程明确（回滚顺序：总开关 → 规则回退 → 插件回退包）</td></tr>
+</tbody>
+</table>
+
+<h2>T6 指标统一（修正稿）</h2>
+<table>
+<thead><tr><th>指标</th><th>统一口径</th><th>原问题</th></tr></thead>
+<tbody>
+<tr><td>单条规则匹配耗时</td><td>≤ 10ms（P99）</td><td>原 10/50/10ms 三处矛盾 → 统一为 10ms，50ms 作为整体上行处理预算组成部分</td></tr>
+<tr><td>上行安全处理额外耗时</td><td>&lt; 50ms（P99）整体，分场景见 T7</td><td>保持一致</td></tr>
+<tr><td>规则变更生效</td><td>≤ 1 秒、无需重启</td><td>一致</td></tr>
+<tr><td>重点敏感字段识别率</td><td>≥ 95%（定义测试集口径：9 类 × 正常/变体/伪装样例，见分类清单第五节）</td><td>缺测试口径</td></tr>
+<tr><td>非敏感字段误修改率</td><td>≤ 0.01%，每日抽检复核</td><td>原"0"不可测量</td></tr>
+<tr><td>降级策略执行正确率</td><td>≥ 99.9%，抽样复核</td><td>原"100%"不可测量</td></tr>
+<tr><td>请求标识生成率 / 传递完整率</td><td>≥ 99.99% / ≥ 99.9%</td><td>原"100%"微调</td></tr>
+<tr><td>脱敏模块可用性 / 恢复时间</td><td>≥ 99.9% / ≤ 30 分钟</td><td>一致</td></tr>
+<tr><td>统计延迟 / 采集完整率</td><td>≤ 5 分钟 / ≥ 99.9%</td><td>一致</td></tr>
+</tbody>
+</table>
+
+<h2>T7 分场景性能指标（D5 落地）</h2>
+<table>
+<thead><tr><th>场景</th><th>调用量</th><th>上行处理时延（P99）</th><th>吞吐影响</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>设备之家-外部客户问答</td><td>10000+ 次/日（峰值需评估 QPS，建议压测按 100 QPS 起步）</td><td><b>≤ 50ms</b></td><td>≤ 10%</td><td>高并发、外网客户、时延敏感，一期压测重点</td></tr>
+<tr><td>核心-内部员工问答</td><td>100~1000 次/日</td><td><b>≤ 100ms</b></td><td>可放宽（≤ 15%）</td><td>低频，可用性优先</td></tr>
+<tr><td>智能-内部内容生成</td><td>100~1000 次/日</td><td><b>≤ 100ms</b></td><td>可放宽（≤ 15%）</td><td>低频</td></tr>
+</tbody>
+</table>
+<h3>压测口径（验收配套）</h3>
+<ul>
+<li>报文规模：10KB / 100KB 两档；规则集：50 / 200 条两档；并发：按场景 QPS 模型（设备之家 100 QPS 起步）；</li>
+<li>指标：上行处理额外耗时 P99、规则匹配耗时 P99、吞吐下降比例；</li>
+<li>流式（SSE）场景：另测首包延迟增量与合并检测开销（分片合并属二期，一期仅测透传不阻塞）；</li>
+<li>结果回填文档 2.4.1，作为验收依据。</li>
+</ul>
+<p><span class="ok">✅ 已确认：压测 QPS 100 起步（T7）；实际当前负载可能更低，可按实际下调压测模型</span></p>
+
+<div class="note">✅ <b>已确认（4 项）</b>：① T2 disposition=replace 归并可接受；② T3 表设计按本方案先行（保留周期后续按行内审计要求调整）；③ T5 熔断阈值 5% 保留，但<b>一期暂不接 Prometheus（需技评）</b>，监控改用水星日志统计 + 本地计数告警；④ T7 压测 QPS 100 起步（实际负载可能更低，可按实际下调）。<br>
+<b>待办</b>：Prometheus 接入走技评（二期）；修订原方案时同步调整 2.4.4 可观测性表述（一期：日志统计；二期：Prometheus）。</div>
+
+</body>
+</html>

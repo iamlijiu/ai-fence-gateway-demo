@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zl.demo.fence.mapper.RuleChangeLogMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="BaseResultMap" type="com.zl.demo.fence.entity.RuleChangeLog">
+        <id column="change_id" property="changeId"/>
+        <result column="rule_id" property="ruleId"/>
+        <result column="action" property="action"/>
+        <result column="rule_version" property="ruleVersion"/>
+        <result column="operator" property="operator"/>
+        <result column="change_detail" property="changeDetail"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <!-- 基础列 -->
+    <sql id="Base_Column_List">
+        change_id, rule_id, action, rule_version, operator, change_detail, created_at
+    </sql>
+
+    <!-- 根据ID查询 -->
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM rule_change_log
+        WHERE change_id = #{changeId}
+    </select>
+
+    <!-- 根据规则ID查询 -->
+    <select id="selectByRuleId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM rule_change_log
+        WHERE rule_id = #{ruleId}
+        <if test="startTime != null">
+            AND created_at &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND created_at &lt;= #{endTime}
+        </if>
+        ORDER BY created_at DESC
+    </select>
+
+    <!-- 根据操作人查询 -->
+    <select id="selectByOperator" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM rule_change_log
+        WHERE operator = #{operator}
+        <if test="startTime != null">
+            AND created_at &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND created_at &lt;= #{endTime}
+        </if>
+        ORDER BY created_at DESC
+    </select>
+
+    <!-- 根据操作类型查询 -->
+    <select id="selectByAction" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM rule_change_log
+        WHERE action = #{action}
+        <if test="startTime != null">
+            AND created_at &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND created_at &lt;= #{endTime}
+        </if>
+        ORDER BY created_at DESC
+    </select>
+
+    <!-- 查询最近的变更记录 -->
+    <select id="selectRecent" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM rule_change_log
+        ORDER BY created_at DESC
+        <if test="limit != null">
+            FETCH FIRST #{limit} ROWS ONLY
+        </if>
+    </select>
+
+    <!-- 插入变更记录 -->
+    <insert id="insert" parameterType="com.zl.demo.fence.entity.RuleChangeLog">
+        INSERT INTO rule_change_log (
+            change_id, rule_id, action, rule_version, operator, change_detail, created_at
+        ) VALUES (
+            #{changeId, jdbcType=VARCHAR},
+            #{ruleId, jdbcType=VARCHAR},
+            #{action, jdbcType=VARCHAR},
+            #{ruleVersion, jdbcType=INTEGER},
+            #{operator, jdbcType=VARCHAR},
+            #{changeDetail, jdbcType=CLOB},
+            #{createdAt, jdbcType=TIMESTAMP}
+        )
+    </insert>
+
+    <!-- 删除指定时间之前的变更记录 -->
+    <delete id="deleteBeforeTime">
+        DELETE FROM rule_change_log
+        WHERE created_at &lt; #{beforeTime}
+    </delete>
+
+    <!-- 统计指定时间范围内的变更数量 -->
+    <select id="countByTimeRange" resultType="int">
+        SELECT COUNT(*)
+        FROM rule_change_log
+        WHERE created_at &gt;= #{startTime}
+          AND created_at &lt;= #{endTime}
+    </select>
+
+    <!-- 按操作类型统计 -->
+    <select id="countByAction" resultType="java.util.Map">
+        SELECT action, COUNT(*) as count
+        FROM rule_change_log
+        WHERE created_at &gt;= #{startTime}
+          AND created_at &lt;= #{endTime}
+        GROUP BY action
+        ORDER BY count DESC
+    </select>
+
+    <!-- 按操作人统计 -->
+    <select id="countByOperator" resultType="java.util.Map">
+        SELECT operator, COUNT(*) as count
+        FROM rule_change_log
+        WHERE created_at &gt;= #{startTime}
+          AND created_at &lt;= #{endTime}
+        GROUP BY operator
+        ORDER BY count DESC
+    </select>
+
+</mapper>

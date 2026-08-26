@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zl.demo.fence.mapper.DesensitizationLogMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="BaseResultMap" type="com.zl.demo.fence.entity.DesensitizationLog">
+        <id column="log_id" property="logId"/>
+        <result column="request_id" property="requestId"/>
+        <result column="rule_id" property="ruleId"/>
+        <result column="rule_name" property="ruleName"/>
+        <result column="field_path" property="fieldPath"/>
+        <result column="mask_strategy" property="maskStrategy"/>
+        <result column="disposition" property="disposition"/>
+        <result column="disposition_result" property="dispositionResult"/>
+        <result column="risk_level" property="riskLevel"/>
+        <result column="original_hash" property="originalHash"/>
+        <result column="desensitized_len" property="desensitizedLen"/>
+        <result column="cost_ms" property="costMs"/>
+        <result column="route" property="route"/>
+        <result column="consumer" property="consumer"/>
+        <result column="model" property="model"/>
+        <result column="timestamp" property="timestamp"/>
+    </resultMap>
+
+    <!-- 基础列 -->
+    <sql id="Base_Column_List">
+        log_id, request_id, rule_id, rule_name, field_path, mask_strategy,
+        disposition, disposition_result, risk_level, original_hash, desensitized_len,
+        cost_ms, route, consumer, model, timestamp
+    </sql>
+
+    <!-- 根据ID查询 -->
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_log
+        WHERE log_id = #{logId}
+    </select>
+
+    <!-- 根据请求ID查询 -->
+    <select id="selectByRequestId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_log
+        WHERE request_id = #{requestId}
+        ORDER BY timestamp ASC
+    </select>
+
+    <!-- 根据规则ID查询 -->
+    <select id="selectByRuleId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_log
+        WHERE rule_id = #{ruleId}
+        <if test="startTime != null">
+            AND timestamp &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND timestamp &lt;= #{endTime}
+        </if>
+        ORDER BY timestamp DESC
+    </select>
+
+    <!-- 根据路由查询 -->
+    <select id="selectByRoute" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_log
+        WHERE route = #{route}
+        <if test="startTime != null">
+            AND timestamp &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND timestamp &lt;= #{endTime}
+        </if>
+        ORDER BY timestamp DESC
+    </select>
+
+    <!-- 根据业务方查询 -->
+    <select id="selectByConsumer" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_log
+        WHERE consumer = #{consumer}
+        <if test="startTime != null">
+            AND timestamp &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND timestamp &lt;= #{endTime}
+        </if>
+        ORDER BY timestamp DESC
+    </select>
+
+    <!-- 查询高风险日志 -->
+    <select id="selectHighRisk" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM desensitization_log
+        WHERE risk_level = '高'
+        <if test="startTime != null">
+            AND timestamp &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND timestamp &lt;= #{endTime}
+        </if>
+        ORDER BY timestamp DESC
+    </select>
+
+    <!-- 插入日志 -->
+    <insert id="insert" parameterType="com.zl.demo.fence.entity.DesensitizationLog">
+        INSERT INTO desensitization_log (
+            log_id, request_id, rule_id, rule_name, field_path, mask_strategy,
+            disposition, disposition_result, risk_level, original_hash, desensitized_len,
+            cost_ms, route, consumer, model, timestamp
+        ) VALUES (
+            #{logId, jdbcType=VARCHAR},
+            #{requestId, jdbcType=VARCHAR},
+            #{ruleId, jdbcType=VARCHAR},
+            #{ruleName, jdbcType=VARCHAR},
+            #{fieldPath, jdbcType=VARCHAR},
+            #{maskStrategy, jdbcType=VARCHAR},
+            #{disposition, jdbcType=VARCHAR},
+            #{dispositionResult, jdbcType=VARCHAR},
+            #{riskLevel, jdbcType=VARCHAR},
+            #{originalHash, jdbcType=VARCHAR},
+            #{desensitizedLen, jdbcType=INTEGER},
+            #{costMs, jdbcType=DECIMAL},
+            #{route, jdbcType=VARCHAR},
+            #{consumer, jdbcType=VARCHAR},
+            #{model, jdbcType=VARCHAR},
+            #{timestamp, jdbcType=TIMESTAMP}
+        )
+    </insert>
+
+    <!-- 批量插入日志（Oracle 12c兼容） -->
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT ALL
+        <foreach collection="logs" item="log" index="index">
+            INTO desensitization_log (
+                log_id, request_id, rule_id, rule_name, field_path, mask_strategy,
+                disposition, disposition_result, risk_level, original_hash, desensitized_len,
+                cost_ms, route, consumer, model, timestamp
+            ) VALUES (
+                #{log.logId, jdbcType=VARCHAR},
+                #{log.requestId, jdbcType=VARCHAR},
+                #{log.ruleId, jdbcType=VARCHAR},
+                #{log.ruleName, jdbcType=VARCHAR},
+                #{log.fieldPath, jdbcType=VARCHAR},
+                #{log.maskStrategy, jdbcType=VARCHAR},
+                #{log.disposition, jdbcType=VARCHAR},
+                #{log.dispositionResult, jdbcType=VARCHAR},
+                #{log.riskLevel, jdbcType=VARCHAR},
+                #{log.originalHash, jdbcType=VARCHAR},
+                #{log.desensitizedLen, jdbcType=INTEGER},
+                #{log.costMs, jdbcType=DECIMAL},
+                #{log.route, jdbcType=VARCHAR},
+                #{log.consumer, jdbcType=VARCHAR},
+                #{log.model, jdbcType=VARCHAR},
+                #{log.timestamp, jdbcType=TIMESTAMP}
+            )
+        </foreach>
+        SELECT 1 FROM DUAL
+    </insert>
+
+    <!-- 删除指定时间之前的日志 -->
+    <delete id="deleteBeforeTime">
+        DELETE FROM desensitization_log
+        WHERE timestamp &lt; #{beforeTime}
+    </delete>
+
+    <!-- 统计指定时间范围内的日志数量 -->
+    <select id="countByTimeRange" resultType="int">
+        SELECT COUNT(*)
+        FROM desensitization_log
+        WHERE timestamp &gt;= #{startTime}
+          AND timestamp &lt;= #{endTime}
+    </select>
+
+    <!-- 按路由统计日志数量 -->
+    <select id="countByRoute" resultType="java.util.Map">
+        SELECT route, COUNT(*) as count
+        FROM desensitization_log
+        WHERE timestamp &gt;= #{startTime}
+          AND timestamp &lt;= #{endTime}
+        GROUP BY route
+        ORDER BY count DESC
+    </select>
+
+    <!-- 按规则统计日志数量 -->
+    <select id="countByRule" resultType="java.util.Map">
+        SELECT rule_id, rule_name, COUNT(*) as count
+        FROM desensitization_log
+        WHERE timestamp &gt;= #{startTime}
+          AND timestamp &lt;= #{endTime}
+        GROUP BY rule_id, rule_name
+        ORDER BY count DESC
+    </select>
+
+    <!-- 按业务方统计拦截数量 -->
+    <select id="countBlockedByConsumer" resultType="java.util.Map">
+        SELECT consumer, COUNT(*) as count
+        FROM desensitization_log
+        WHERE disposition_result = 'blocked'
+          AND timestamp &gt;= #{startTime}
+          AND timestamp &lt;= #{endTime}
+        GROUP BY consumer
+        ORDER BY count DESC
+    </select>
+
+    <!-- 统计平均处理耗时（按路由） -->
+    <select id="avgCostByRoute" resultType="java.util.Map">
+        SELECT route,
+               AVG(cost_ms) as avg_cost_ms,
+               MAX(cost_ms) as max_cost_ms,
+               COUNT(*) as count
+        FROM desensitization_log
+        WHERE timestamp &gt;= #{startTime}
+          AND timestamp &lt;= #{endTime}
+        GROUP BY route
+        ORDER BY avg_cost_ms DESC
+    </select>
+
+</mapper>

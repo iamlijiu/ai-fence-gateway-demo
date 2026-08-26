@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI安全围栏 · 开发启动前检查单</title>
+<style>
+body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;max-width:1000px;margin:0 auto;padding:24px 32px 60px;color:#24292f;line-height:1.7;background:#fff}
+h1{font-size:26px;border-bottom:2px solid #0969da;padding-bottom:8px;color:#0b57d0}
+h2{font-size:20px;border-bottom:1px solid #d0d7de;padding-bottom:6px;margin-top:30px}
+h3{font-size:16px;margin-top:22px;color:#0b57d0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #d0d7de;padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#f0f4fa;font-weight:600}
+tbody tr:nth-child(even){background:#f8fafc}
+tr:hover{background:#eef4ff}
+code{background:#f0f2f5;padding:1px 5px;border-radius:4px;color:#c7254e;font-size:13px}
+.tag{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
+.tag-red{background:#fde8e8;color:#c0392b}
+.tag-yellow{background:#fef7e0;color:#b7791f}
+.tag-green{background:#e6f6e6;color:#1e7e34}
+.note{background:#fff8e6;border:1px solid #f0d9a0;border-radius:6px;padding:10px 14px;margin:14px 0;font-size:13.5px}
+.ok{color:#1e7e34;font-weight:600}
+strong{color:#0b57d0}
+</style>
+</head>
+<body>
+
+<h1>AI安全围栏 · 开发启动前检查单</h1>
+<p>按"阻塞开发的程度"分四组：<span class="tag tag-red">A. 代码输入</span>（我写代码必须拿到）→ <span class="tag tag-yellow">B. 技术决策</span>（需拍板）→ <span class="tag tag-green">C. 环境资源</span>（开发/联调前置）→ <span class="tag tag-green">D. 可并行</span>（不阻塞开发）。</p>
+
+<h2>A. 代码输入（写代码第一件事，缺一不可）</h2>
+<table>
+<thead><tr><th>#</th><th>需要拿到</th><th>用途</th><th>提供方</th></tr></thead>
+<tbody>
+<tr><td>A1</td><td><b>现有网关工程代码</b>（仓库地址/分支/可读权限）</td><td>插件必须基于现有 WebFlux 链路开发（现有 Filter 链、路由注册、SSE/ResponseEmitter 用法）</td><td>网关负责人</td></tr>
+<tr><td>A2</td><td><b>真实请求报文样例</b>：每个业务方至少 1 个非流式 + 1 个流式典型请求（脱敏后样例）</td><td>报文解析、规则匹配、脱敏执行的开发与单测基准</td><td>三个业务方</td></tr>
+<tr><td>A3</td><td><b>业务方 → 路由 → 模型 映射清单</b>（火山/阿里 model id、各业务方是否用 stream）</td><td>路由/scope 配置、统一适配层 model 映射表</td><td>网关负责人+业务方</td></tr>
+<tr><td>A4</td><td><b>ZL-OPENID 编码清单</b>（业务方编码、安全等级、初始静态密钥）</td><td>白名单初始化、鉴权模块联调</td><td>你/业务方</td></tr>
+<tr><td>A5</td><td>现有网关<b>鉴权/过滤器现状确认</b>（确认无鉴权、现有 filter 执行顺序）</td><td>ZL-OPENID WebFilter 插入位置设计</td><td>网关负责人</td></tr>
+</tbody>
+</table>
+
+<h2>B. 技术决策（需拍板，拍板后才能定接口与结构）</h2>
+<table>
+<thead><tr><th>#</th><th>决策项</th><th>我的建议</th></tr></thead>
+<tbody>
+<tr><td>B1</td><td><b>管理后台技术栈</b>（E3 新建，但栈未定）：前端框架、后端框架、部署形态</td><td>后端 Spring Boot（与网关同栈便于复用规则模型）；前端 Vue3 或 React（视行内惯例）；独立部署</td></tr>
+<tr><td>B2</td><td><b>插件代码组织</b>：网关工程内新增模块结构；规则引擎是否抽独立 library</td><td>抽独立 library（rule-engine 与 gateway 分离），管理后台校验与网关执行共用同一规则模型与校验逻辑</td></tr>
+<tr><td>B3</td><td><b>OpenAI 适配细节</b>：火山方舟 / 阿里百炼的 API 地址、鉴权 Header（火山 AK/SK vs 阿里 API-Key）、model 命名映射</td><td>统一适配层：请求按 OpenAI 规范归一；出站时映射为目标厂商格式与凭证（此表我需与你们确认两家最新接入文档）</td></tr>
+<tr><td>B4</td><td><b>边界参数</b>：请求体大小上限、单请求匹配总耗时上限、WebClient 连接池/超时（SSE 场景）、熔断 5% 的统计窗口</td><td>请求体 ≤10MB；匹配总耗时 ≤50ms；WebClient 连接池按 100 QPS 起步估算；熔断窗口 1 分钟滑动</td></tr>
+<tr><td>B5</td><td><b>初始规则集</b>：9 类 → 具体规则 JSON（默认值落库）</td><td>用《敏感信息分类清单》初稿直接生成初始规则集 JSON（我可代劳，你确认）</td></tr>
+<tr><td>B6</td><td><b>热加载时效口径</b>：原"≤1s 生效"是否放宽（Apollo 默认轮询即可满足放宽后的口径）</td><td>放宽为"变更后 ≤5 分钟生效"（不阻塞，需你确认后更新定稿版指标）</td></tr>
+</tbody>
+</table>
+
+<h2>C. 环境与资源（开发/联调前置）</h2>
+<table>
+<thead><tr><th>#</th><th>资源</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>C1</td><td>网关测试环境</td><td>可部署插件版本，用于联调</td></tr>
+<tr><td>C2</td><td>Oracle 测试库 + DDL 执行权限</td><td>4 张表 DDL 已就绪（T3），待执行</td></tr>
+<tr><td>C3</td><td>Apollo 测试命名空间</td><td>dsh-rule-signal / 密钥 / ZL-OPENID 白名单</td></tr>
+<tr><td>C4</td><td>火山方舟、阿里百炼 <b>测试 API Key</b></td><td>模型转发联调必需</td></tr>
+<tr><td>C5</td><td>管理后台开发/部署环境</td><td>新应用，含部署位与域名</td></tr>
+<tr><td>C6</td><td>水星日志平台接入方式</td><td>logback appender / 接口方式确认</td></tr>
+</tbody>
+</table>
+
+<h2>D. 可并行（不阻塞开发，随开发推进即可）</h2>
+<table>
+<thead><tr><th>#</th><th>事项</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>D1</td><td>9 类清单与行内数据分级映射</td><td>安全合规确认，发布 v1.1（不影响开发）</td></tr>
+<tr><td>D2</td><td>模型数据留存/训练政策确认</td><td>火山、阿里（合规动作，不影响开发）</td></tr>
+<tr><td>D3</td><td>压测环境与基线</td><td>开发后期/联调阶段才需要</td></tr>
+<tr><td>D4</td><td>业务方接入排期与配合窗口</td><td>上线前安排联调窗口</td></tr>
+<tr><td>D5</td><td>管理后台技评材料</td><td>若需技评，随开发并行准备</td></tr>
+</tbody>
+</table>
+
+<div class="note">📌 <b>我可以在等待期间自己推进的</b>：① 初始规则集 JSON（B5，基于 9 类清单）；② 测试数据集（9 类 × 正常/变体/伪装样例）；③ 接口契约细化（管理后台 CRUD ↔ 网关）；④ 统一适配层接口定义（B3 出站映射结构）。<br><br>✅ <b>已就绪不阻塞</b>：定稿版方案、9 类清单、规则模型（disposition）、4 张表 DDL、ZL-OPENID 方案、指标口径、分场景性能。</div>
+
+</body>
+</html>

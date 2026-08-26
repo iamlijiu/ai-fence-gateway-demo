@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ai-fence-gateway-demo · 说明文档</title>
+<style>
+body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;max-width:1000px;margin:0 auto;padding:24px 32px 60px;color:#24292f;line-height:1.7;background:#fff}
+h1{font-size:26px;border-bottom:2px solid #0969da;padding-bottom:8px;color:#0b57d0}
+h2{font-size:20px;border-bottom:1px solid #d0d7de;padding-bottom:6px;margin-top:30px}
+h3{font-size:16px;margin-top:22px;color:#0b57d0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #d0d7de;padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#f0f4fa;font-weight:600}
+tbody tr:nth-child(even){background:#f8fafc}
+tr:hover{background:#eef4ff}
+code{background:#f0f2f5;padding:1px 5px;border-radius:4px;color:#c7254e;font-size:13px}
+pre{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:12px 14px;font-size:12.5px;line-height:1.5;overflow-x:auto}
+.note{background:#eef7ee;border:1px solid #b7d9b7;border-radius:6px;padding:10px 14px;margin:14px 0;font-size:13.5px}
+.warn{background:#fff8e6;border:1px solid #f0d9a0;border-radius:6px;padding:10px 14px;margin:14px 0;font-size:13.5px}
+strong{color:#0b57d0}
+</style>
+</head>
+<body>
+
+<h1>ai-fence-gateway-demo</h1>
+<p><strong>Tomcat + WebFlux 转发 AI 接口 Demo</strong> —— 用于与现有网关工程对齐对照。</p>
+<p>技术栈与现有网关一致：<strong>Spring Boot 2.0.8 + WebFlux 5.0.5 + Tomcat</strong>，Java 8。提供 <strong>OpenAI 兼容</strong>的单一入口 <code>POST /v1/chat/completions</code>，按请求体 <code>stream: true/false</code> 分流：</p>
+<table>
+<thead><tr><th>stream</th><th>转发方式</th><th>返回形式</th></tr></thead>
+<tbody>
+<tr><td><code>true</code></td><td><strong>WebClient</strong>（响应式）</td><td><strong>SSE</strong>（text/event-stream）逐块返回</td></tr>
+<tr><td><code>false</code></td><td><strong>RestTemplate</strong>（阻塞）</td><td><strong>JSON</strong> 一次性返回</td></tr>
+</tbody>
+</table>
+<p>内置 <strong>Mock 上游</strong>（<code>/mock/v1/chat/completions</code>，OpenAI 兼容格式），无外部 API Key 即可端到端验证；接入真实供应商只需改配置。</p>
+
+<div class="note">✅ <b>已实测通过</b>（本机 WSL 环境，JDK8 构建运行）：非流式 JSON 转发、流式 SSE 透传（3 段 + [DONE]）、ZL-OPENID 403 拦截均验证 OK；启动日志确认 <code>Tomcat/8.5.37</code> 承载 WebFlux（ReactiveWebServerApplicationContext）。</div>
+
+<h2>一、目录结构</h2>
+<pre>ai-fence-gateway-demo/
+├── pom.xml                              # Spring Boot 2.0.8.RELEASE，Java 8
+└── src/main/
+    ├── java/com/zl/demo/
+    │   ├── AiFenceGatewayDemoApplication.java   # 启动类
+    │   ├── config/
+    │   │   ├── DemoProperties.java              # demo.* 配置（上游/超时/白名单）
+    │   │   └── HttpClientConfig.java            # Tomcat 工厂 + RestTemplate + WebClient
+    │   ├── filter/
+    │   │   └── ZlOpenIdWebFilter.java           # ZL-OPENID 简单认证（WebFilter）
+    │   └── controller/
+    │       ├── ChatCompletionsController.java   # 网关入口（stream 分流转发）
+    │       └── MockUpstreamController.java      # 内置 Mock 上游（SSE + JSON）
+    └── resources/
+        └── application.yml                      # 配置（端口/上游地址/白名单）</pre>
+
+<h2>二、构建与运行</h2>
+<pre>export JAVA_HOME=/home/cbj/workspace/.tools/jdk8u502-b07   # Linux JDK8（已下载）
+mvn -q -DskipTests clean package
+java -jar target/ai-fence-gateway-demo-1.0.0.jar</pre>
+<p>默认端口 <code>8080</code>，默认上游为内置 Mock（<code>http://localhost:8080/mock/v1</code>）。<br>
+⚠️ 当前已有实例在运行（127.0.0.1:8080），如需重启先停掉旧进程。</p>
+
+<h2>三、验证用例（curl）</h2>
+<h3>1. 非流式（stream=false）→ 一次性 JSON</h3>
+<pre>curl -s -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "ZL-OPENID: sbzj_device" \
+  -d '{"model":"qwen-max","stream":false,"messages":[{"role":"user","content":"你好"}]}'
+# 预期：{"id":"mock-json","model":"qwen-max","choices":[{"message":{...}}]}</pre>
+<h3>2. 流式（stream=true）→ SSE 逐块返回</h3>
+<pre>curl -N -s -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -H "ZL-OPENID: sbzj_device" \
+  -d '{"model":"qwen-max","stream":true,"messages":[{"role":"user","content":"你好"}]}'
+# 预期：3 段 data: {...}，最后 data: [DONE]</pre>
+<h3>3. 鉴权拦截（无 ZL-OPENID）→ 403</h3>
+<pre>curl -s -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen-max","stream":false,"messages":[]}'
+# 预期：403 {"code":403,"message":"ZL-OPENID invalid or missing"}</pre>
+
+<h2>四、接入真实供应商</h2>
+<p>改 <code>application.yml</code> 的 <code>demo.upstream-base-url</code>：</p>
+<pre>demo:
+  upstream-base-url: https://ark.cn-beijing.volces.com/api/v3   # 火山方舟
+  # upstream-base-url: https://dashscope.aliyuncs.com/compatible-mode/v1  # 阿里百炼</pre>
+<p>出站请求按 OpenAI 规范透传；如需厂商特有参数（火山 <code>model</code> 命名映射、鉴权 Header），在 <code>ChatCompletionsController</code> 的转发处补充即可。</p>
+
+<h2>五、与现有网关的对比要点（对照检查清单）</h2>
+<table>
+<thead><tr><th>维度</th><th>Demo 实现</th><th>请对照原项目确认</th></tr></thead>
+<tbody>
+<tr><td>WebFlux 运行容器</td><td>显式 <code>TomcatReactiveWebServerFactory</code>（webflux starter 默认带 Netty，Netty 优先，需显式声明 Tomcat 工厂）</td><td>原项目是否同样显式 Tomcat？还是实际跑在 Netty？</td></tr>
+<tr><td>流式转发</td><td>WebClient + <code>bodyToFlux(DataBuffer)</code> + <code>writeAndFlushWith</code>（字节级 SSE 透传）</td><td>原项目用 ResponseEmitter 还是 Flux？字节级透传 vs 逐行解析的取舍</td></tr>
+<tr><td>非流式转发</td><td>RestTemplate（阻塞）</td><td>与原项目一致；注意 WebFlux 内阻塞调用会占用容器线程</td></tr>
+<tr><td>鉴权插入点</td><td><code>WebFilter</code>（HIGHEST_PRECEDENCE，Controller 之前）</td><td>原项目 Filter 链顺序、是否已有其他 Filter</td></tr>
+<tr><td>单接口分流</td><td>一个 <code>/v1/chat/completions</code> 方法内读 body <code>stream</code> 字段分流</td><td>原项目是否同一接口分流，还是两个接口</td></tr>
+<tr><td>OpenAI 兼容</td><td>请求/响应按 OpenAI 格式透传，出站统一规范</td><td>原项目对火山/阿里的差异处理（model 映射、鉴权 Header）</td></tr>
+</tbody>
+</table>
+
+<h2>六、注意事项</h2>
+<ol>
+<li><strong>WebFlux + Tomcat</strong>：<code>spring-boot-starter-webflux</code> 默认用 Reactor Netty 作为服务器；要跑在 Tomcat 上必须像 <code>HttpClientConfig</code> 那样显式声明 <code>TomcatReactiveWebServerFactory</code>。若原项目没这么做，实际可能在 Netty 上运行——这会影响线程模型与压测结论，值得确认。</li>
+<li><strong>阻塞调用</strong>：非流式分支的 RestTemplate 是阻塞的，在 WebFlux 容器上会占用 Tomcat 线程；Demo 保持与现状一致，生产建议评估换 WebClient（非阻塞）。</li>
+<li><strong>SSE 透传</strong>：Demo 用字节级透传（<code>DataBuffer</code>），最大程度保真（含 <code>[DONE]</code>、事件注释等）；若需要解析/改写 SSE 内容（二期下行检测、占位符还原），需改为按事件解析（<code>ServerSentEvent</code> 或自解析行）。</li>
+<li><strong>Demo 未包含</strong>：脱敏规则引擎、disposition 处置、日志/指标、灰度开关——这些属于安全围栏插件本体，不在本转发 Demo 范围内。</li>
+<li><strong>构建环境备注</strong>：本机 Maven 的 settings.xml 配了 Windows 路径 localRepository（E:/maven_jar_space），在 WSL 下会失效；构建时用 <code>-Dmaven.repo.local=/home/cbj/workspace/.m2repo</code> 指定工作区内仓库。</li>
+</ol>
+
+</body>
+</html>

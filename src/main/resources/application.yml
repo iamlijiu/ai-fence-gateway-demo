@@ -1,0 +1,61 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    # 强制 MVC 模式（spring-webflux 库引入了 DispatcherHandler，不指定会冲突）
+    web-application-type: servlet
+  # 数据源配置（Oracle 12c）
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/orcl
+    username: ai_fence
+    password: ${DB_PASSWORD:password}
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+# MyBatis配置
+mybatis:
+  config-location: classpath:mybatis-config.xml
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.zl.demo.fence.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+demo:
+  server-port: 8080
+  upstream-base-url: http://localhost:8080/mock/v1
+  connect-timeout-ms: 5000
+  read-timeout-ms: 60000
+  openid:
+    enabled: true
+    whitelist:
+      - sbzj_device
+      - app_yl_yongying
+      - hx_core
+    bypass-paths:
+      - /mock
+      - /api
+  fence:
+    # 围栏总开关（一键启停）
+    enabled: true
+    # 旁路观察模式：true=只检测不执行处置，记录"如执行会命中什么"日志
+    dry-run: false
+    # 降级策略：reject=拒绝请求 / passthrough=透传放行（记录原因）
+    degrade-strategy: passthrough
+    # 熔断阈值：处理异常率超过此值自动降级（百分比）
+    circuit-breaker-threshold: 5.0
+    # 熔断统计窗口（秒）
+    circuit-breaker-window-seconds: 60
+    # 熔断恢复时间（秒）
+    circuit-breaker-recovery-seconds: 300
+
+logging:
+  level:
+    root: INFO
+    com.zl.demo.fence.mapper: DEBUG

@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zl.demo.fence.mapper.ViolationLogMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="BaseResultMap" type="com.zl.demo.fence.entity.ViolationLog">
+        <id column="violation_id" property="violationId"/>
+        <result column="request_id" property="requestId"/>
+        <result column="model" property="model"/>
+        <result column="route" property="route"/>
+        <result column="consumer" property="consumer"/>
+        <result column="violation_type" property="violationType"/>
+        <result column="risk_level" property="riskLevel"/>
+        <result column="content_hash" property="contentHash"/>
+        <result column="hit_snippet" property="hitSnippet"/>
+        <result column="detect_mode" property="detectMode"/>
+        <result column="feedback_status" property="feedbackStatus"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <!-- 基础列 -->
+    <sql id="Base_Column_List">
+        violation_id, request_id, model, route, consumer, violation_type,
+        risk_level, content_hash, hit_snippet, detect_mode, feedback_status, created_at
+    </sql>
+
+    <!-- 根据ID查询 -->
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM violation_log
+        WHERE violation_id = #{violationId}
+    </select>
+
+    <!-- 根据请求ID查询 -->
+    <select id="selectByRequestId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM violation_log
+        WHERE request_id = #{requestId}
+        ORDER BY created_at ASC
+    </select>
+
+    <!-- 根据违规类型查询 -->
+    <select id="selectByType" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM violation_log
+        WHERE violation_type = #{violationType}
+        <if test="startTime != null">
+            AND created_at &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND created_at &lt;= #{endTime}
+        </if>
+        ORDER BY created_at DESC
+    </select>
+
+    <!-- 根据业务方查询 -->
+    <select id="selectByConsumer" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM violation_log
+        WHERE consumer = #{consumer}
+        <if test="startTime != null">
+            AND created_at &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND created_at &lt;= #{endTime}
+        </if>
+        ORDER BY created_at DESC
+    </select>
+
+    <!-- 查询待反馈的违规记录 -->
+    <select id="selectPendingFeedback" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM violation_log
+        WHERE feedback_status = 'pending'
+        ORDER BY created_at ASC
+        <if test="limit != null">
+            FETCH FIRST #{limit} ROWS ONLY
+        </if>
+    </select>
+
+    <!-- 插入违规记录 -->
+    <insert id="insert" parameterType="com.zl.demo.fence.entity.ViolationLog">
+        INSERT INTO violation_log (
+            violation_id, request_id, model, route, consumer, violation_type,
+            risk_level, content_hash, hit_snippet, detect_mode, feedback_status, created_at
+        ) VALUES (
+            #{violationId, jdbcType=VARCHAR},
+            #{requestId, jdbcType=VARCHAR},
+            #{model, jdbcType=VARCHAR},
+            #{route, jdbcType=VARCHAR},
+            #{consumer, jdbcType=VARCHAR},
+            #{violationType, jdbcType=VARCHAR},
+            #{riskLevel, jdbcType=VARCHAR},
+            #{contentHash, jdbcType=VARCHAR},
+            #{hitSnippet, jdbcType=VARCHAR},
+            #{detectMode, jdbcType=VARCHAR},
+            #{feedbackStatus, jdbcType=VARCHAR},
+            #{createdAt, jdbcType=TIMESTAMP}
+        )
+    </insert>
+
+    <!-- 更新反馈状态 -->
+    <update id="updateFeedbackStatus">
+        UPDATE violation_log
+        SET feedback_status = #{feedbackStatus, jdbcType=VARCHAR}
+        WHERE violation_id = #{violationId, jdbcType=VARCHAR}
+    </update>
+
+    <!-- 删除指定时间之前的违规记录 -->
+    <delete id="deleteBeforeTime">
+        DELETE FROM violation_log
+        WHERE created_at &lt; #{beforeTime}
+    </delete>
+
+    <!-- 统计指定时间范围内的违规数量 -->
+    <select id="countByTimeRange" resultType="int">
+        SELECT COUNT(*)
+        FROM violation_log
+        WHERE created_at &gt;= #{startTime}
+          AND created_at &lt;= #{endTime}
+    </select>
+
+    <!-- 按违规类型统计 -->
+    <select id="countByType" resultType="java.util.Map">
+        SELECT violation_type, COUNT(*) as count
+        FROM violation_log
+        WHERE created_at &gt;= #{startTime}
+          AND created_at &lt;= #{endTime}
+        GROUP BY violation_type
+        ORDER BY count DESC
+    </select>
+
+    <!-- 按风险等级统计 -->
+    <select id="countByRiskLevel" resultType="java.util.Map">
+        SELECT risk_level, COUNT(*) as count
+        FROM violation_log
+        WHERE created_at &gt;= #{startTime}
+          AND created_at &lt;= #{endTime}
+        GROUP BY risk_level
+        ORDER BY count DESC
+    </select>
+
+</mapper>

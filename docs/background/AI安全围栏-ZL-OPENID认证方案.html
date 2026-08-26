@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI安全围栏 · ZL-OPENID 简单认证方案</title>
+<style>
+body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;max-width:1000px;margin:0 auto;padding:24px 32px 60px;color:#24292f;line-height:1.7;background:#fff}
+h1{font-size:26px;border-bottom:2px solid #0969da;padding-bottom:8px;color:#0b57d0}
+h2{font-size:20px;border-bottom:1px solid #d0d7de;padding-bottom:6px;margin-top:30px}
+h3{font-size:16px;margin-top:22px;color:#0b57d0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #d0d7de;padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#f0f4fa;font-weight:600}
+tbody tr:nth-child(even){background:#f8fafc}
+tr:hover{background:#eef4ff}
+code{background:#f0f2f5;padding:1px 5px;border-radius:4px;color:#c7254e;font-size:13px}
+.note{background:#fff8e6;border:1px solid #f0d9a0;border-radius:6px;padding:10px 14px;margin:14px 0;font-size:13.5px}
+.ok{color:#1e7e34;font-weight:600}
+strong{color:#0b57d0}
+</style>
+</head>
+<body>
+
+<h1>ZL-OPENID 简单认证方案（D2 落地）</h1>
+
+<div class="note">📌 <b>背景</b>：E2 结论——现有网关<b>无鉴权能力</b>，因此一期必须建设基础身份识别。本方案定位"简单认证"：识别调用方身份 + 白名单校验，为规则 scope（按业务方）、全链路日志与统计提供调用方标识；完整鉴权（统一认证/OAuth2/mTLS）二期演进。</div>
+
+<h2>一、方案总览</h2>
+<table>
+<thead><tr><th>要素</th><th>方案</th></tr></thead>
+<tbody>
+<tr><td>身份标识</td><td>请求头 <code>ZL-OPENID</code>：业务方编码（如 <code>app_yl_yongying</code>、<code>sbzj_device</code>、<code>hx_core</code>）</td></tr>
+<tr><td>认证强度</td><td>一期：白名单校验（编码在册即通过）＋ 可选静态密钥 <code>ZL-API-KEY</code> 比对（默认启用）</td></tr>
+<tr><td>实现位置</td><td>网关 WebFlux 链路中新增 <code>WebFilter</code>（非阻塞），在规则匹配/脱敏之前执行</td></tr>
+<tr><td>凭据管理</td><td>业务方编码→密钥映射存 Apollo（密文），网关本地缓存；密钥可轮换</td></tr>
+<tr><td>失败处置</td><td>缺失/非法 → 默认拒绝（401/403）；可按业务方配置为"透传+告警"（低风险场景）</td></tr>
+<tr><td>输出</td><td>鉴权通过后注入请求上下文：<code>consumer</code>（=ZL-OPENID）、安全等级；并随请求标识写入日志</td></tr>
+</tbody>
+</table>
+
+<h2>二、Header 接口约定</h2>
+<table>
+<thead><tr><th>Header</th><th>类型</th><th>必填</th><th>示例</th><th>校验规则</th></tr></thead>
+<tbody>
+<tr><td><code>ZL-OPENID</code></td><td>String</td><td>是</td><td><code>sbzj_device</code></td><td>非空、长度 ≤64、在白名单中（本地缓存）</td></tr>
+<tr><td><code>ZL-API-KEY</code></td><td>String</td><td>是*</td><td><code>zkey_xxxxxxxx</code></td><td>与配置映射比对一致（*一期若未启用密钥校验则可不传，见 D2-2）</td></tr>
+</tbody>
+</table>
+
+<h2>三、校验流程（响应式、非阻塞）</h2>
+<ol>
+<li>网关收到请求 → <code>WebFilter</code> 读取 <code>ZL-OPENID</code>（缺失 → 走降级/拒绝分支）；</li>
+<li>查本地缓存白名单（Caffeine，Apollo 推送更新）：编码不存在 → 拒绝（403 + 错误码 <code>AUTH_OPENID_INVALID</code>）；</li>
+<li>若启用密钥校验：比对 <code>ZL-API-KEY</code> 与配置值（常量时间比较），不一致 → 拒绝（401 <code>AUTH_KEY_MISMATCH</code>）；</li>
+<li>通过 → 将 <code>consumer</code>、安全等级写入请求上下文（Reactor Context），后续规则匹配 scope 与日志模块直接读取；</li>
+<li>为请求生成统一请求标识 <code>request_id</code>（与链路标识模块联动），一并入上下文。</li>
+</ol>
+
+<h2>四、与现有网关的集成要点（WebFlux / ResponseEmitter）</h2>
+<ul>
+<li>以 <b>WebFilter / HandlerFilterFunction</b> 实现，全程非阻塞（不调用阻塞 IO、不用 ThreadLocal 传递业务值，用 Reactor Context）；</li>
+<li>流式请求（SSE，ResponseEmitter）同样先经过 Filter，鉴权与脱敏在流式输出前完成；</li>
+<li>白名单缓存更新走 Apollo 推送，不影响请求链路；</li>
+<li>与脱敏插件解耦：鉴权模块只产出"调用方身份 + 安全等级"，处置逻辑由规则引擎消费。</li>
+</ul>
+
+<h2>五、异常与降级</h2>
+<table>
+<thead><tr><th>场景</th><th>默认行为</th><th>可配置</th><th>日志记录</th></tr></thead>
+<tbody>
+<tr><td>ZL-OPENID 缺失</td><td>拒绝 401</td><td>按路由/接口配置为透传+告警</td><td>记录缺失、路由、时间</td></tr>
+<tr><td>ZL-OPENID 不在白名单</td><td>拒绝 403</td><td>同上</td><td>记录非法编码、来源 IP</td></tr>
+<tr><td>密钥不匹配</td><td>拒绝 401</td><td>同上</td><td>不记录密钥明文</td></tr>
+<tr><td>Apollo 不可用（白名单缓存过期）</td><td>按安全等级降级：拒绝（默认）或透传+告警</td><td>按业务方</td><td>记录降级原因</td></tr>
+</tbody>
+</table>
+
+<h2>六、安全注意事项</h2>
+<ul>
+<li>仅接受 HTTPS 传输；网关内网入口前置，Header 由网关覆盖/校验，防止下游伪造透传；</li>
+<li>密钥比对用常量时间比较，防时序侧信道；日志、监控、异常信息中<b>禁止输出密钥明文</b>；</li>
+<li>密钥轮换：Apollo 更新 → 双密钥窗口（新旧并行 5 分钟）→ 验证后下线旧密钥，全程告警；</li>
+<li>白名单与密钥映射属敏感配置，管理后台变更需留痕（rule_change_log 同源审计，或独立 auth_change_log）。</li>
+</ul>
+
+<h2>七、二期升级路径</h2>
+<ol>
+<li>一期：白名单 + 可选静态密钥（本方案）；</li>
+<li>二期：接入统一认证体系（OAuth2 Client Credentials / 行内统一门户），ZL-OPENID 作为业务方标识保留，密钥校验升级为令牌校验；</li>
+<li>完整授权（按接口/模型粒度）二期交付；统一流式/非流式接口一期已实现（请求统一 JSON，按 stream:true/false 以 SSE 或一次性 JSON 返回）。</li>
+</ol>
+
+</body>
+</html>
